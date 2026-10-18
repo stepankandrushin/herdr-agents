@@ -1,0 +1,19 @@
+# herdr's agents sidebar with herdr-sidebar's tokens. Merge this table into your herdr config
+# (~/.config/herdr/config.toml) and run `herdr server reload-config`.
+#
+# A Claude Code pane: the folder it runs in ($place, where herdr's own `workspace` names the
+# folder its workspace was opened in), how long ago it last did something ($last_active: now,
+# 7m, 5h, 3d) and the context its session holds ($context: 53k); then the session's name, which
+# Claude Code writes into its terminal title; then its last shell command, dimmed, and the last
+# line of that command's output ($last_cmd, $last_out): "…" while it runs, "✗" if it failed.
+# Codex and pi keep herdr's default rows, with $place for the workspace, and get the context and
+# the last command too.
+[ui.sidebar.agents.rows_by_agent]
+claude = [["state_icon", "machine", "$place", "$last_active", "$context"], ["terminal_title_stripped"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
+codex = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
+pi = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
+
+# Optional: the outer terminal's title carries the tab, which for a Claude Code tab is the
+# session's name.
+# [ui]
+# window_title = "{hostname}: {workspace} · {tab}"
