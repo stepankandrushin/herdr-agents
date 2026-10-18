@@ -1,9 +1,10 @@
-# herdr-sidebar
+# herdr-agents
 
-More in [herdr](https://herdr.dev)'s agents sidebar for Claude Code, Codex and pi panes: the
-folder each agent runs in, how long ago it last did something, how much context its session
-holds, and the last shell command it ran with the last line of that command's output. Claude
-Code tabs are named after their sessions.
+How I run Claude Code, Codex and pi side by side in [herdr](https://herdr.dev): my herdr config,
+and a small program that adds to herdr's agents sidebar, for each agent pane, the folder it runs
+in, how long ago it last did something, how much context its session holds, and the last shell
+command it ran with the last line of that command's output. Claude Code tabs are named after
+their sessions.
 
 ```
 ● api · now · 57k
@@ -18,9 +19,13 @@ With a dozen agents open, herdr shows that each one exists and whether it is wor
 what you would otherwise switch tabs to find out: which project it is in, whether it finished a
 minute ago or yesterday, whether its context is close to full, and what it is doing right now.
 
-It is one Python file, `herdr-sidebar.py`, standard library only. It runs as a Claude Code hook,
-and the hook starts a small background process (the ticker) that keeps every pane's figures
-current, Codex and pi panes included.
+Two files do it:
+
+- `config.toml`, my herdr config: the sidebar rows that show these values, and the rest of what
+  I set ([The config](#the-config)).
+- `herdr-agents.py`, one Python file, standard library only. It runs as a Claude Code hook, and
+  the hook starts a small background process (the ticker) that keeps every pane's figures
+  current, Codex and pi panes included.
 
 ## Requirements
 
@@ -35,7 +40,7 @@ current, Codex and pi panes included.
 1. Clone the repository anywhere:
 
    ```sh
-   git clone https://github.com/stepankandrushin/herdr-sidebar.git ~/herdr-sidebar
+   git clone https://github.com/stepankandrushin/herdr-agents.git ~/herdr-agents
    ```
 
 2. Register the hook in `~/.claude/settings.json`, on four events. It is async, so a prompt
@@ -44,25 +49,51 @@ current, Codex and pi panes included.
    ```json
    {
      "hooks": {
-       "SessionStart":     [{"hooks": [{"type": "command", "command": "python3 ~/herdr-sidebar/herdr-sidebar.py", "timeout": 5, "async": true}]}],
-       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 ~/herdr-sidebar/herdr-sidebar.py", "timeout": 5, "async": true}]}],
-       "Stop":             [{"hooks": [{"type": "command", "command": "python3 ~/herdr-sidebar/herdr-sidebar.py", "timeout": 5, "async": true}]}],
-       "StopFailure":      [{"hooks": [{"type": "command", "command": "python3 ~/herdr-sidebar/herdr-sidebar.py", "timeout": 5, "async": true}]}]
+       "SessionStart":     [{"hooks": [{"type": "command", "command": "python3 ~/herdr-agents/herdr-agents.py", "timeout": 5, "async": true}]}],
+       "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 ~/herdr-agents/herdr-agents.py", "timeout": 5, "async": true}]}],
+       "Stop":             [{"hooks": [{"type": "command", "command": "python3 ~/herdr-agents/herdr-agents.py", "timeout": 5, "async": true}]}],
+       "StopFailure":      [{"hooks": [{"type": "command", "command": "python3 ~/herdr-agents/herdr-agents.py", "timeout": 5, "async": true}]}]
      }
    }
    ```
 
    Merge these into the hooks you already have rather than replacing them.
 
-3. Add the sidebar rows from [config.example.toml](config.example.toml) to
-   `~/.config/herdr/config.toml` and reload it: `herdr server reload-config`.
+3. Take the config. Either use mine whole, as a link in place of yours, so that a `git pull`
+   updates it too:
+
+   ```sh
+   ln -s ~/herdr-agents/config.toml ~/.config/herdr/config.toml
+   ```
+
+   or merge into your `~/.config/herdr/config.toml` the parts of [config.toml](config.toml) you
+   want; the `[ui.sidebar.agents.rows_by_agent]` table is the one that shows the values. Then
+   reload it: `herdr server reload-config`.
 
 4. Start Claude Code in a herdr pane. Its first hook starts the ticker, which fills in every
    agent pane of that herdr server within two seconds. Claude Code reads its hooks when a
    session starts, so sessions that were already running take the hook once restarted; until
    then the ticker keeps their rows current anyway.
 
-To update, `git pull`: the ticker notices that its file changed and restarts itself.
+To update, `git pull`: the ticker notices that its file changed and restarts itself. A changed
+config takes effect at the next `herdr server reload-config`.
+
+## The config
+
+[config.toml](config.toml), with a comment on each setting:
+
+- **The agents sidebar** (`[ui.sidebar.agents.rows_by_agent]`): three rows for each agent pane.
+  A Claude Code pane shows its folder, age and context on the first row, the session's name on
+  the second, and its last command with that command's last line of output on the third. Codex
+  and pi panes keep herdr's default first two rows (the workspace and the tab, then the agent's
+  name), with the folder in place of the workspace, and get the context and the last command
+  too. The values are in [What it shows](#what-it-shows).
+- **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
+  of asking for a name. A Claude Code tab then takes its session's name by itself
+  ([Tab names](#tab-names)); any other keeps its number until you rename it.
+- **The outer terminal's title** (`window_title`): the host, the workspace and the tab, so the
+  terminal's window or tab list shows which session is in front, and on which machine.
+- `onboarding = false` is herdr's own first-run marker: a new machine skips the tour.
 
 ## What it shows
 
@@ -88,14 +119,14 @@ Code leaves the tab (it quits, or a shell or another agent takes its place), the
 number back.
 
 It renames only a tab that holds no other agent and whose label is still herdr's generated
-number or the name herdr-sidebar gave it. A tab you renamed by hand keeps its name.
+number or the name herdr-agents gave it. A tab you renamed by hand keeps its name.
 
 ## How it works
 
 - **The hook** runs on SessionStart, UserPromptSubmit, Stop and StopFailure. It reports the
   pane's activity time, names its tab, and starts the ticker if none is running for this herdr
   server. Outside herdr it exits at once.
-- **The ticker** (`herdr-sidebar.py --tick`) runs one per herdr server, guarded by a lock. Every
+- **The ticker** (`herdr-agents.py --tick`) runs one per herdr server, guarded by a lock. Every
   two seconds it asks herdr for its agent panes, rereads only the session logs that have grown,
   moves the ages on, and reports the tokens that changed. It reads each agent's own log:
   Claude Code's transcript (`~/.claude/projects/*/<session>.jsonl`, by the session id herdr's
@@ -104,9 +135,9 @@ number or the name herdr-sidebar gave it. A tab you renamed by hand keeps its na
   session file herdr's pi integration reports. It reads the last megabyte of a log only, about
   a millisecond even for a log of tens of megabytes.
 - It exits two minutes after the herdr server has gone; the next hook starts a new one. It
-  restarts itself when `herdr-sidebar.py` changes.
+  restarts itself when `herdr-agents.py` changes.
 - It talks to herdr over its socket (`HERDR_SOCKET_PATH`), the same way herdr's own integrations
-  do, and reports under the metadata source `herdr-sidebar`.
+  do, and reports under the metadata source `herdr-agents`.
 
 The ticker is started only by a Claude Code hook, so a herdr server with no Claude Code pane
 shows no figures for its Codex and pi panes.
@@ -120,8 +151,8 @@ It honours `CLAUDE_CONFIG_DIR` for where Claude Code keeps its transcripts.
 
 ## Uninstall
 
-Remove the four hooks from `~/.claude/settings.json` and the rows from herdr's config, then stop
-the ticker: `pkill -f 'herdr-sidebar.py --tick'`.
+Remove the four hooks from `~/.claude/settings.json` and the config (the link, or the rows you
+merged), then stop the ticker: `pkill -f 'herdr-agents.py --tick'`.
 
 ## Development
 

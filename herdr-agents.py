@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# herdr-sidebar: more in herdr's agents sidebar for Claude Code, Codex and pi panes.
-# https://github.com/stepankandrushin/herdr-sidebar, MIT license. README.md says how to install it.
+# herdr-agents: more in herdr's agents sidebar for Claude Code, Codex and pi panes.
+# https://github.com/stepankandrushin/herdr-agents, MIT license. README.md says how to install it.
 #
 # A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does five things in
 # the herdr server the pane belongs to:
 #
 # - Reports how long ago each Claude Code session last did something as the pane token
-#   $last_active, which herdr's sidebar rows can show (config.example.toml): now, 7m, 5h, 3d,
+#   $last_active, which herdr's sidebar rows can show (config.toml): now, 7m, 5h, 3d,
 #   and "now" for as long as herdr sees it at work. The time itself is kept in $last_active_at.
 #   A pane with no time yet takes it from its transcript's last message.
 # - Reports the folder each agent pane runs in as $place, for Claude Code, Codex and pi: the
@@ -25,7 +25,7 @@
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
 #   generated number or the name this gave it, so a tab renamed by hand keeps its name.
 #
-# The hook starts `herdr-sidebar.py --tick`, one per herdr server, which keeps all five
+# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all five
 # current: every two seconds it rereads the logs that have grown, redoes the ages that have
 # moved on, follows each Claude pane's title into its tab, and starts itself again when this
 # file changes. It exits when the server has been gone for two minutes; the next hook starts a
@@ -45,7 +45,7 @@ import subprocess
 import sys
 import time
 
-SOURCE = "herdr-sidebar"
+SOURCE = "herdr-agents"
 SOCK = os.environ.get("HERDR_SOCKET_PATH")
 PANE = os.environ.get("HERDR_PANE_ID")
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")

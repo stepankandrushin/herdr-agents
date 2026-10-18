@@ -1,5 +1,19 @@
-# herdr's agents sidebar with herdr-sidebar's tokens. Merge this table into your herdr config
-# (~/.config/herdr/config.toml) and run `herdr server reload-config`.
+# My herdr config, ~/.config/herdr/config.toml, as a link to this file. Use it whole, or merge
+# the parts you want into yours, then run `herdr server reload-config`. The sidebar rows at the
+# end are the part that shows herdr-agents' tokens.
+
+# herdr's own first-run marker: a new machine skips the tour.
+onboarding = false
+
+[ui]
+# New tabs open at once with herdr's generated number, no name prompt. A Claude Code tab then
+# takes its session's name from herdr-agents; rename any other with the rename-tab key.
+prompt_new_tab_name = false
+# The outer terminal's title: the host, the workspace and the tab, which for a Claude Code tab
+# is the session's name.
+window_title = "{hostname}: {workspace} · {tab}"
+
+# The agents sidebar, three rows for each agent pane.
 #
 # A Claude Code pane: the folder it runs in ($place, where herdr's own `workspace` names the
 # folder its workspace was opened in), how long ago it last did something ($last_active: now,
@@ -12,8 +26,3 @@
 claude = [["state_icon", "machine", "$place", "$last_active", "$context"], ["terminal_title_stripped"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
 codex = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
 pi = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
-
-# Optional: the outer terminal's title carries the tab, which for a Claude Code tab is the
-# session's name.
-# [ui]
-# window_title = "{hostname}: {workspace} · {tab}"
