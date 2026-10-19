@@ -44,6 +44,10 @@ def usage(**n):
     return {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}], "usage": n}}
 
 
+def say(text):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+
 class Format(unittest.TestCase):
     def test_age(self):
         now = 1_000_000
@@ -81,6 +85,12 @@ class Format(unittest.TestCase):
 
     def test_no_command(self):
         self.assertEqual(herdr_agents.command_tokens(None), {"last_cmd": None, "last_out": None})
+
+    def test_message_on_one_line(self):
+        said = "## Done\n\n- **Tests** pass: `pytest -q`\n```sh\nmake\n```\nSee [notes](/src/api/notes.md)."
+        self.assertEqual(herdr_agents.gist(said), "Done Tests pass: pytest -q make See notes.")
+        self.assertIsNone(herdr_agents.gist(None))
+        self.assertIsNone(herdr_agents.gist("```\n```"))
 
     def test_place(self):
         with mock.patch.dict(os.environ, {"HOME": "/home/u"}):
@@ -124,6 +134,20 @@ class Claude(Logs):
         side = dict(bash_call("s", "rm -rf build"), isSidechain=True)
         path = self.log(bash_call("a", "ls"), bash_result("a", "x"), side)
         self.assertEqual(herdr_agents.claude_command(path)[0], "ls")
+
+    def test_last_message(self):
+        side = {"type": "assistant", "isSidechain": True, "message": {"content": [{"type": "text", "text": "sub"}]}}
+        path = self.log(say("Fixed the redirect."), bash_call("a", "pytest"), bash_result("a", "ok"), side)
+        self.assertEqual(herdr_agents.claude_message(path), "Fixed the redirect.")
+
+    def test_message_reported_with_the_command(self):
+        path = self.log(say("Running the tests."), bash_call("a", "pytest -q"), bash_result("a", "2 passed"))
+        pane = {"agent": "claude", "pane_id": "w1:p1"}
+        with mock.patch.object(herdr_agents, "session_log", return_value=path), \
+                mock.patch.object(herdr_agents, "call") as call:
+            herdr_agents.commands([pane], {}, {})
+        tokens = call.call_args.args[1]["tokens"]
+        self.assertEqual((tokens["last_message"], tokens["last_cmd"]), ("Running the tests.", "$ pytest -q"))
 
     def test_context(self):
         path = self.log(usage(input_tokens=2, cache_creation_input_tokens=1000,
@@ -236,6 +260,13 @@ class Codex(Logs):
                         {"type": "compacted", "payload": {}})
         self.assertIsNone(herdr_agents.codex_context(path))
 
+    def test_last_message(self):
+        reply = {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "Committed on main."}]}}
+        path = self.log(reply, {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "thanks"}]}})
+        self.assertEqual(herdr_agents.codex_message(path), "Committed on main.")
+
 
 class Pi(Logs):
     def test_last_command(self):
@@ -249,6 +280,17 @@ class Pi(Logs):
         path = self.log({"message": {"role": "assistant", "usage": {"totalTokens": 8000}}},
                         {"message": {"role": "assistant", "stopReason": "aborted", "usage": {"totalTokens": 1}}})
         self.assertEqual(herdr_agents.pi_context(path), 8000)
+
+    def test_last_message(self):
+        path = self.log({"message": {"role": "assistant", "content": [{"type": "text", "text": "Found it."}]}},
+                        {"message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "hm"}]}})
+        self.assertEqual(herdr_agents.pi_message(path), "Found it.")
+
+    def test_aborted_turn_is_the_last_message(self):
+        path = self.log({"message": {"role": "assistant", "content": [{"type": "text", "text": "Found it."}]}},
+                        {"message": {"role": "assistant", "content": [], "stopReason": "aborted",
+                                     "errorMessage": "Operation aborted"}})
+        self.assertEqual(herdr_agents.pi_message(path), "Operation aborted")
 
 
 class Hook(unittest.TestCase):

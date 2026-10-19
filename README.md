@@ -2,18 +2,19 @@
 
 How I run Claude Code, Codex and pi side by side in [herdr](https://herdr.dev): my herdr config,
 and a small program that adds to herdr's agents sidebar, for each agent pane, the folder it runs
-in, how long ago it last did something, how much context its session holds, and the last shell
-command it ran with the last line of that command's output. Claude Code, Codex and pi tabs are
+in, how long ago it last did something, how much context its session holds, and the start of
+its last message to you (or the last shell command it ran, with the last line of that command's
+output). Claude Code, Codex and pi tabs are
 named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀 Fix login | api`,
 `🥧 Fix tests - api`.
 
 ```
 ● 🦀 api · now · 57k
   Fix the flaky login test
-  $ pytest -q tests/test_login.py · ✗ FAILED tests/test_login.py::test_redirect
+  The redirect test fails only when the session cookie is older than the token, so I'm …
 ○ 🌀 docs · 3h · 12k
   Changelog for 2.4
-  $ git status --short · ✓
+  Committed the 2.4 changelog on main; the release notes link to it.
 ```
 
 With a dozen agents open, herdr shows that each one exists and whether it is working. This adds
@@ -85,9 +86,10 @@ config takes effect at the next `herdr server reload-config`.
 
 - **The agents sidebar** (`[ui.sidebar.agents.rows_by_agent]`): three rows for each agent pane.
   Each pane shows the agent's emoji (🦀 Claude Code, 🌀 Codex, 🥧 pi) with its folder, then
-  its age and context, on the first row, the session's name on the second, and the last command
-  with its last line of output on the third. pi has no age. The values are in
-  [What it shows](#what-it-shows).
+  its age and context, on the first row, the session's name on the second, and the start of its
+  last message to you on the third. pi has no age. The values are in
+  [What it shows](#what-it-shows). A comment there gives the third row that shows the last
+  command and its output instead.
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
   of asking for a name. Claude Code, Codex and pi tabs then take their session names by themselves
   ([Tab names](#tab-names)); other tabs keep their numbers until you rename them.
@@ -106,6 +108,7 @@ Each value is a pane token, which herdr's sidebar rows name with a `$`:
 | `$session_title` | Codex, pi | Its session name from the terminal title: Codex's with the working spinner and temporary `Action Required` prefix removed, pi's without its `π - `. Used for the sidebar and automatic tab name. |
 | `$last_active` | Claude Code, Codex | How long ago the session last did something: `now`, `7m`, `5h`, `3d`. It reads `now` for as long as herdr sees the agent at work. A resumed session shows the time of its last message, so herdr restoring its panes does not make them all look active. Codex's time comes from its current rollout, including turn completion and command events; a fresh session with no log has no age yet. The time itself is in `$last_active_at` (Unix seconds). |
 | `$context` | Claude Code, Codex, pi | The context the session holds, to the thousand: `5k`, `120k`. It is the tokens of the last model call, input and reply, as each agent counts them for its own gauge: Claude Code's usage with the cache, Codex's `last_token_usage.total_tokens`, pi's `totalTokens`. Empty before the first reply, and after a compaction until the next reply, except in Claude Code, whose compaction records what it left. |
+| `$last_message` | Claude Code, Codex, pi | The start of the agent's last message to you, on one line: the text it wrote last, between tool calls or at the end of its turn, with markdown's marks (`**`, backticks, headings, list bullets, link targets) removed. herdr cuts it to the sidebar's width. For pi, a turn that ended without a reply shows pi's reason: `Operation aborted`, `Request timed out.` Empty before the first message. |
 | `$last_cmd` | Claude Code, Codex, pi | The last shell command, `$ ` and its first line, without a leading `cd <dir> &&`. |
 | `$last_out` | Claude Code, Codex, pi | The last line of that command's output that has a letter or digit in it. `…` while the command runs, `✗ <line>` if it failed, `✓` if it printed nothing. For a Claude Code background command or an output too long for the transcript, it is read from the file the output went to, so a long job shows its current line. |
 

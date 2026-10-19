@@ -2,7 +2,7 @@
 # herdr-agents: more in herdr's agents sidebar for Claude Code, Codex and pi panes.
 # https://github.com/stepankandrushin/herdr-agents, MIT license. README.md says how to install it.
 #
-# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does five things in
+# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does six things in
 # the herdr server the pane belongs to:
 #
 # - Reports how long ago each Claude Code or Codex session last did something as the pane token
@@ -16,6 +16,8 @@
 #   and $last_out, for Claude Code, Codex and pi alike, read from the agent's own session log:
 #   Claude Code's transcript, the Codex rollout its process holds open, the pi session file
 #   herdr's pi integration names. A command still running shows "…", one that failed "✗".
+# - Reports the start of each agent pane's last message to the user, on one line, from the
+#   same log, as $last_message: Done, tests pass and the fix is committed…
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
 #   tokens of its last model call to the thousand (5k, 120k).
 # - Names a Claude Code, Codex or pi pane's tab as the agent's emoji (🦀 Claude Code, 🌀 Codex,
@@ -25,7 +27,7 @@
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
 #   generated number or the name this gave it, so a tab renamed by hand keeps its name.
 #
-# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all five
+# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all six
 # current: every two seconds it rereads the logs that have grown, redoes the ages that have
 # moved on, follows each supported pane's title into its tab, and starts itself again when this
 # file changes. It exits when the server has been gone for two minutes; the next hook starts a
@@ -175,10 +177,10 @@ def refresh(agents, now, skip=None, cache=None):
 # holds the output instead of the log (a background command's, or one too long for the log),
 # which the ticker watches as well.
 
-def texts(content):
+def texts(content, kind="text"):
     if isinstance(content, str):
         return content
-    return "\n".join(c.get("text", "") for c in content or [] if c.get("type") == "text")
+    return "\n".join(c.get("text", "") for c in content or [] if c.get("type") == kind)
 
 
 def tail(path, size=8192):
@@ -291,6 +293,45 @@ def pi_context(path):
 CONTEXT = {"claude": claude_context, "codex": codex_context, "pi": pi_context}
 
 
+# The agent's last message to the user: its last text, written between tool calls or at the end
+# of a turn, or for pi a turn that ended without one ("Operation aborted", "Request timed out.").
+# None before the first.
+
+def claude_message(path):
+    for e in entries(path):
+        if e.get("type") == "assistant" and not e.get("isSidechain"):
+            text = texts((e.get("message") or {}).get("content"))
+            if text.strip():
+                return text
+    return None
+
+
+def codex_message(path):
+    for e in entries(path):
+        p = e.get("payload") or {}
+        if e.get("type") == "response_item" and p.get("type") == "message" and p.get("role") == "assistant":
+            text = texts(p.get("content"), "output_text")
+            if text.strip():
+                return text
+    return None
+
+
+def pi_message(path):
+    for e in entries(path):
+        m = e.get("message") or {}
+        if m.get("role") != "assistant":
+            continue
+        if m.get("stopReason") in ("aborted", "error") and m.get("errorMessage"):
+            return m["errorMessage"]
+        text = texts(m.get("content"))
+        if text.strip():
+            return text
+    return None
+
+
+MESSAGE = {"claude": claude_message, "codex": codex_message, "pi": pi_message}
+
+
 def kilo(n):
     """5k, 120k: to the thousand, short for the sidebar."""
     return "%dk" % int(n / 1000 + 0.5) if n else None
@@ -307,6 +348,20 @@ EMPTY = ("(no output)", "(Bash completed with no output)")
 def one_line(s):
     s = ANSI.sub("", s).split("\r")[-1]  # a progress bar's last state
     return " ".join("".join(ch if ch.isprintable() else " " for ch in s).split())
+
+
+FENCE = re.compile(r"^\s*(```|~~~)")
+MARK = re.compile(r"^\s*(#+|[-*+>])\s+")  # a heading's, a list item's, a quote's
+LINK = re.compile(r"\[([^]]*)\]\([^)]*\)")
+
+
+def gist(text):
+    """A message as one line, from its start, without markdown's marks: the sidebar shows as
+    much as fits."""
+    if not text:
+        return None
+    lines = [MARK.sub("", line) for line in text.splitlines() if not FENCE.match(line)]
+    return one_line(LINK.sub(r"\1", " ".join(lines)).replace("**", "").replace("`", ""))[:200] or None
 
 
 def command_tokens(found):
@@ -382,8 +437,8 @@ def stamp(path):
 
 
 def commands(agents, seen, cache):
-    """Report each agent pane's last command and context whose log has changed since the last
-    pass."""
+    """Report each agent pane's last command, last message and context whose log has changed
+    since the last pass."""
     for a in agents:
         read = READERS.get(a.get("agent"))
         if not read:
@@ -392,16 +447,17 @@ def commands(agents, seen, cache):
         last = seen.get(a["pane_id"])
         if last and last[0] == stamp(path) and stamp(last[1]) == last[2]:
             continue
-        found = size = None
+        found = size = said = None
         try:
             if path and os.path.exists(path):
                 size = CONTEXT[a["agent"]](path)
+                said = MESSAGE[a["agent"]](path)
                 found = read(path)
         except (OSError, ValueError, AttributeError, TypeError):
             pass  # a log this cannot read: tried again once it grows
         follow = found and found[3]
         seen[a["pane_id"]] = (stamp(path), follow, stamp(follow))
-        tokens = dict(command_tokens(found), context=kilo(size))
+        tokens = dict(command_tokens(found), context=kilo(size), last_message=gist(said))
         have = a.get("tokens") or {}
         if any(have.get(k) != v for k, v in tokens.items()):
             call("pane.report_metadata", {

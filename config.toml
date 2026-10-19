@@ -19,11 +19,12 @@ window_title = "{hostname}: {workspace} · {tab}"
 # Each pane: the agent's emoji and its folder ($icon_place: 🦀 api, where herdr's own `workspace`
 # names the folder its workspace was opened in), how long ago it last did something
 # ($last_active: now, 7m, 5h, 3d) and the context its session holds ($context: 53k); then the
-# session's name, which the agent writes into its terminal title; then its last shell command,
-# dimmed, and the last line of that command's output ($last_cmd, $last_out): "…" while it runs,
-# "✗" if it failed. Codex's $session_title also removes its temporary "Action Required" prefix,
-# pi's its "π - ". pi has no age.
+# session's name, which the agent writes into its terminal title; then the start of its last
+# message to you ($last_message), on one line: what it is doing, or what it did. Codex's
+# $session_title also removes its temporary "Action Required" prefix, pi's its "π - ". pi has no
+# age. For the last shell command and its output's last line instead, the third row can be
+# [{ token = "$last_cmd", dim = true }, "$last_out"].
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["terminal_title_stripped"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
-codex = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
-pi = [["state_icon", "machine", "$icon_place", "$context"], ["$session_title"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
+claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["terminal_title_stripped"], ["$last_message"]]
+codex = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]
+pi = [["state_icon", "machine", "$icon_place", "$context"], ["$session_title"], ["$last_message"]]
