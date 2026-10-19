@@ -3,8 +3,9 @@
 How I run Claude Code, Codex and pi side by side in [herdr](https://herdr.dev): my herdr config,
 and a small program that adds to herdr's agents sidebar, for each agent pane, the folder it runs
 in, how long ago it last did something, how much context its session holds, and the last shell
-command it ran with the last line of that command's output. Claude Code and Codex tabs are named
-after their sessions.
+command it ran with the last line of that command's output. Claude Code, Codex and pi tabs are
+named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀 Fix login | api`,
+`🥧 Fix tests - api`.
 
 ```
 ● api · now · 57k
@@ -89,7 +90,7 @@ config takes effect at the next `herdr server reload-config`.
   name), with the folder in place of the workspace, and get the context and the last command
   too. The values are in [What it shows](#what-it-shows).
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
-  of asking for a name. Claude Code and Codex tabs then take their session names by themselves
+  of asking for a name. Claude Code, Codex and pi tabs then take their session names by themselves
   ([Tab names](#tab-names)); other tabs keep their numbers until you rename them.
 - **The outer terminal's title** (`window_title`): the host, the workspace and the tab, so the
   terminal's window or tab list shows which session is in front, and on which machine.
@@ -113,11 +114,13 @@ context, which stay whole.
 
 ### Tab names
 
-Claude Code and Codex tabs take the names their sidebar rows show: the session names in their
-terminal titles, including names set with `/rename`. Codex's temporary `Action Required` prefix
-is removed. Claude Code starts with "Claude Code";
-Codex may show its folder until it generates a session title. A new session in the same tab
-renames it again. When neither supported agent remains in the tab, it gets herdr's number back.
+Claude Code, Codex and pi tabs take the session names in their terminal titles, including names
+set with `/rename`, after an emoji for the agent: 🦀 Claude Code, 🌀 Codex, 🥧 pi. For Claude Code
+and Codex that is the name their sidebar rows show. Codex's temporary `Action Required` prefix
+is removed, and so is pi's `π - `. Claude Code starts with "Claude Code";
+Codex may show its folder until it generates a session title; pi shows its folder after the
+session name, or alone until the session has one. A new session in the same tab renames it
+again. When none of these agents remains in the tab, it gets herdr's number back.
 
 It renames only a tab that holds no other agent and whose label is still herdr's generated
 number or the name herdr-agents gave it. A tab you renamed by hand keeps its name.
@@ -145,7 +148,7 @@ shows no figures for its Codex and pi panes.
 
 Files it writes, in `$XDG_STATE_HOME` (default `~/.local/state`):
 
-- `herdr-claude-tabs.json`: the names it gave to Claude Code and Codex tabs, so it can tell them
+- `herdr-claude-tabs.json`: the names it gave to Claude Code, Codex and pi tabs, so it can tell them
   from names set by hand. The filename is kept for existing installations.
 - `herdr-claude-ticker-<hash>.lock`: one per herdr server, held by that server's ticker.
 

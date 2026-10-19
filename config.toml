@@ -6,11 +6,12 @@
 onboarding = false
 
 [ui]
-# New tabs open at once with herdr's generated number, no name prompt. Claude Code and Codex
-# tabs then take their session names from herdr-agents; rename others with the rename-tab key.
+# New tabs open at once with herdr's generated number, no name prompt. Claude Code, Codex and pi
+# tabs then take their session names from herdr-agents, after the agent's emoji (🦀 Claude Code,
+# 🌀 Codex, 🥧 pi); rename others with the rename-tab key.
 prompt_new_tab_name = false
 # The outer terminal's title: the host, the workspace and the tab, which for a supported agent
-# is the session's name.
+# is its emoji and the session's name.
 window_title = "{hostname}: {workspace} · {tab}"
 
 # The agents sidebar, three rows for each agent pane.

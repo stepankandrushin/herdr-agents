@@ -282,16 +282,16 @@ class Tabs(Logs):
     def test_idle_working_and_renamed_codex_titles_follow_into_tab(self):
         named = {}
         herdr_agents.tabs([self.pane], named)
-        self.assertEqual(self.tab["label"], "Fix login | api")
+        self.assertEqual(self.tab["label"], "🌀 Fix login | api")
         self.pane["terminal_title"] = "⠇ Fix login | api"
         herdr_agents.tabs([self.pane], named)
-        self.assertEqual(self.renames, ["Fix login | api"])
+        self.assertEqual(self.renames, ["🌀 Fix login | api"])
         self.pane.update(terminal_title="New session | api", terminal_title_stripped="New session | api")
         herdr_agents.tabs([self.pane], named)
-        self.assertEqual(self.tab["label"], "New session | api")
+        self.assertEqual(self.tab["label"], "🌀 New session | api")
         # Restarting the ticker keeps ownership of the name it assigned.
         herdr_agents.tabs([self.pane], {})
-        self.assertEqual(self.tab["label"], "New session | api")
+        self.assertEqual(self.tab["label"], "🌀 New session | api")
 
     def test_approval_status_does_not_become_session_name(self):
         named = {}
@@ -299,9 +299,9 @@ class Tabs(Logs):
             title = "[ %s ] Action Required | Fix login | api" % marker
             self.pane.update(terminal_title=title, terminal_title_stripped=title)
             herdr_agents.tabs([self.pane], named)
-            self.assertEqual(self.tab["label"], "Fix login | api")
+            self.assertEqual(self.tab["label"], "🌀 Fix login | api")
             self.assertEqual(self.pane["tokens"]["session_title"], "Fix login | api")
-        self.assertEqual(self.renames, ["Fix login | api"])
+        self.assertEqual(self.renames, ["🌀 Fix login | api"])
 
     def test_manual_tab_name_is_preserved(self):
         named = {}
@@ -330,13 +330,35 @@ class Tabs(Logs):
         claude = dict(self.pane, agent="claude", terminal_title="✳ Fix docs",
                       terminal_title_stripped="Fix docs")
         herdr_agents.tabs([claude], named)
-        self.assertEqual(self.tab["label"], "Fix docs")
+        self.assertEqual(self.tab["label"], "🦀 Fix docs")
         herdr_agents.tabs([self.pane], named)
-        self.assertEqual(self.tab["label"], "Fix login | api")
+        self.assertEqual(self.tab["label"], "🌀 Fix login | api")
         # An ordinary shell title still must not rename a departing Claude pane.
         claude.update(terminal_title="bash", terminal_title_stripped="bash")
         herdr_agents.tabs([claude], named)
-        self.assertEqual(self.tab["label"], "Fix login | api")
+        self.assertEqual(self.tab["label"], "🌀 Fix login | api")
+
+    def test_pi_title_names_tab(self):
+        named = {}
+        pi = dict(self.pane, agent="pi", terminal_title="π - api", terminal_title_stripped="π - api")
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(self.tab["label"], "🥧 api")
+        pi.update(terminal_title="π - Fix docs - api", terminal_title_stripped="π - Fix docs - api")
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(self.tab["label"], "🥧 Fix docs - api")
+        # The shell's title as pi quits is not a session name.
+        pi.update(terminal_title="bash", terminal_title_stripped="bash")
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(self.tab["label"], "🥧 Fix docs - api")
+        herdr_agents.tabs([], named)
+        self.assertEqual(self.tab["label"], "1")
+
+    def test_name_given_before_the_emoji_takes_it(self):
+        with herdr_agents.given_names() as given:
+            given["/tmp/test.sock w1:t1"] = "Fix login | api"
+        self.tab["label"] = "Fix login | api"
+        herdr_agents.tabs([self.pane], {})
+        self.assertEqual(self.tab["label"], "🌀 Fix login | api")
 
 
 if __name__ == "__main__":

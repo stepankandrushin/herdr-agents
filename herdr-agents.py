@@ -18,8 +18,8 @@
 #   herdr's pi integration names. A command still running shows "…", one that failed "✗".
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
 #   tokens of its last model call to the thousand (5k, 120k).
-# - Names a Claude Code or Codex pane's tab as its sidebar row names it: the session name in
-#   the agent's terminal title, including names set with /rename.
+# - Names a Claude Code, Codex or pi pane's tab as the agent's emoji (🦀 Claude Code, 🌀 Codex,
+#   🥧 pi) and the session name in its terminal title, including names set with /rename.
 #   A new session in the same tab renames it again. When the agent
 #   has gone from the tab (quit, or a shell or another agent in its place), the tab takes
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
@@ -513,7 +513,18 @@ def codex_title(a):
     return re.sub(r"^\[[^]]*\]\s*Action Required\s*\|\s*", "", name).strip() or None
 
 
-TITLES = {"claude": claude_title, "codex": codex_title}
+def pi_title(a):
+    """pi's terminal title after its "π - ": the session name and the folder, or the folder alone
+    before the session has a name. None while the title is not pi's own."""
+    raw = (a.get("terminal_title") or "").strip()
+    if not raw.startswith("π - "):
+        return None
+    return raw[len("π - "):].strip() or None
+
+
+TITLES = {"claude": claude_title, "codex": codex_title, "pi": pi_title}
+# Before each tab name, which agent holds the tab. Each takes two cells in any terminal.
+ICONS = {"claude": "🦀", "codex": "🌀", "pi": "🥧"}
 
 
 def alone(a, agents):
@@ -524,6 +535,7 @@ def name_tab(me, agents, name):
     tab_id = me.get("tab_id")
     if not tab_id or not alone(me, agents):
         return
+    name = "%s %s" % (ICONS[me["agent"]], name)
     tab = call("tab.get", {"tab_id": tab_id}).get("tab") or {}
     current = tab.get("label") or ""
     key = "%s %s" % (SOCK, tab_id)
@@ -552,7 +564,7 @@ def release_tabs(agents):
 
 
 def tabs(agents, named):
-    """Keep each Claude or Codex tab named as its title. Look again when its title, its
+    """Keep each Claude, Codex or pi tab named as its title. Look again when its title, its
     tab or the agents beside it change."""
     supported = [a for a in agents if a.get("agent") in TITLES]
     for pane in set(named) - {a["pane_id"] for a in supported}:
