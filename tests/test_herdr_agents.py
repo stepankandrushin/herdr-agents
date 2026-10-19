@@ -133,6 +133,81 @@ class Claude(Logs):
 
 
 class Codex(Logs):
+    def test_activity_uses_completion_and_ignores_restore_metadata(self):
+        path = self.log(
+            {"type": "response_item", "timestamp": "2026-01-02T03:00:00Z",
+             "payload": {"type": "message", "role": "assistant"}},
+            {"type": "event_msg", "timestamp": "2026-01-02T03:04:05.000Z",
+             "payload": {"type": "task_complete"}},
+            {"type": "event_msg", "timestamp": "2026-01-02T05:00:00Z",
+             "payload": {"type": "thread_settings_applied"}},
+            {"type": "event_msg", "timestamp": "2026-01-02T05:00:01Z",
+             "payload": {"type": "token_count", "info": None}})
+        self.assertEqual(herdr_agents.last_message_at(path, "codex"), 1767323045)
+
+    def test_activity_includes_tool_calls_and_interruption(self):
+        for kind, payload in (("response_item", "custom_tool_call_output"),
+                              ("event_msg", "item_completed"),
+                              ("event_msg", "turn_aborted")):
+            with self.subTest(payload=payload):
+                path = self.log({"type": kind, "timestamp": "2026-01-02T03:04:05Z",
+                                 "payload": {"type": payload}})
+                self.assertEqual(herdr_agents.last_message_at(path, "codex"), 1767323045)
+
+    def test_resume_replaces_stale_pane_age_and_keeps_counting(self):
+        at = 1767323045
+        path = self.log({"type": "event_msg", "timestamp": "2026-01-02T03:04:05Z",
+                         "payload": {"type": "task_complete"}})
+        pane = {"agent": "codex", "pane_id": "w1:p1", "agent_status": "idle",
+                "tokens": {"last_active": "now", "last_active_at": str(at + 10000)}}
+        cache = {}
+        with mock.patch.object(herdr_agents, "session_log", return_value=path), \
+                mock.patch.object(herdr_agents, "call") as call, \
+                mock.patch.object(herdr_agents, "last_message_at",
+                                  wraps=herdr_agents.last_message_at) as read:
+            herdr_agents.refresh([pane], at + 300, cache=cache)
+            report = call.call_args.args[1]
+            self.assertEqual(report["agent"], "codex")
+            self.assertEqual(report["tokens"], {"last_active": "5m", "last_active_at": str(at)})
+            pane["tokens"] = report["tokens"]
+            herdr_agents.refresh([pane], at + 360, cache=cache)
+            self.assertEqual(call.call_args.args[1]["tokens"]["last_active"], "6m")
+            self.assertEqual(read.call_count, 1)
+            with open(path, "a") as f:
+                f.write(json.dumps({"type": "event_msg", "timestamp": "2026-01-02T03:10:05Z",
+                                    "payload": {"type": "task_complete"}}) + "\n")
+            herdr_agents.refresh([pane], at + 360, cache=cache)
+            self.assertEqual(call.call_args.args[1]["tokens"]["last_active"], "now")
+            self.assertEqual(read.call_count, 2)
+
+    def test_working_then_idle_uses_the_completion_time(self):
+        at = 1767323045
+        path = self.log({"type": "response_item", "timestamp": "2026-01-02T03:04:05Z",
+                         "payload": {"type": "message", "role": "user"}})
+        pane = {"agent": "codex", "pane_id": "w1:p1", "agent_status": "working"}
+        cache = {}
+        with mock.patch.object(herdr_agents, "session_log", return_value=path), \
+                mock.patch.object(herdr_agents, "call") as call:
+            herdr_agents.refresh([pane], at + 300, cache=cache)
+            self.assertEqual(call.call_args.args[1]["tokens"]["last_active"], "now")
+            pane["tokens"] = call.call_args.args[1]["tokens"]
+            pane["agent_status"] = "idle"
+            with open(path, "a") as f:
+                f.write(json.dumps({"type": "event_msg", "timestamp": "2026-01-02T03:09:15Z",
+                                    "payload": {"type": "task_complete"}}) + "\n")
+            herdr_agents.refresh([pane], at + 400, cache=cache)
+            self.assertEqual(call.call_args.args[1]["tokens"],
+                             {"last_active": "1m", "last_active_at": str(at + 310)})
+
+    def test_fresh_session_clears_age_inherited_from_previous_agent(self):
+        pane = {"agent": "codex", "pane_id": "w1:p1", "agent_status": "idle",
+                "tokens": {"last_active": "3d", "last_active_at": "1000000"}}
+        with mock.patch.object(herdr_agents, "session_log", return_value=None), \
+                mock.patch.object(herdr_agents, "call") as call:
+            herdr_agents.refresh([pane], 2000000)
+            self.assertEqual(call.call_args.args[1]["tokens"],
+                             {"last_active": None, "last_active_at": None})
+
     def test_last_command(self):
         path = self.log({"payload": {"type": "item_completed", "item": {
             "type": "CommandExecution", "command": ["/bin/bash", "-lc", "cargo test"],
@@ -170,6 +245,98 @@ class Hook(unittest.TestCase):
         with mock.patch.dict(os.environ, {"HERDR_ENV": ""}), redirect_stdout(out):
             herdr_agents.main()
         self.assertEqual(out.getvalue(), "")
+
+
+class Tabs(Logs):
+    def setUp(self):
+        super().setUp()
+        self.pane = {"agent": "codex", "pane_id": "w1:p1", "tab_id": "w1:t1",
+                     "terminal_title": "Fix login | api", "terminal_title_stripped": "Fix login | api"}
+        self.tab = {"tab_id": "w1:t1", "workspace_id": "w1", "label": "1"}
+        self.renames = []
+        for name, value in (("SOCK", "/tmp/test.sock"), ("STATE_DIR", self.tmp.name),
+                            ("STATE", os.path.join(self.tmp.name, "tabs.json"))):
+            patch = mock.patch.object(herdr_agents, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        patch = mock.patch.object(herdr_agents, "call", side_effect=self.api)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def api(self, method, params):
+        if method == "tab.get":
+            return {"tab": dict(self.tab)}
+        if method == "tab.list":
+            return {"tabs": [dict(self.tab)]}
+        if method == "tab.rename":
+            self.tab["label"] = params["label"]
+            self.renames.append(params["label"])
+            return {}
+        if method == "pane.report_metadata":
+            self.assertEqual(params["agent"], "codex")
+            if params["pane_id"] == self.pane["pane_id"]:
+                self.pane.setdefault("tokens", {}).update(params["tokens"])
+            return {}
+        self.fail("Unexpected method: " + method)
+
+    def test_idle_working_and_renamed_codex_titles_follow_into_tab(self):
+        named = {}
+        herdr_agents.tabs([self.pane], named)
+        self.assertEqual(self.tab["label"], "Fix login | api")
+        self.pane["terminal_title"] = "⠇ Fix login | api"
+        herdr_agents.tabs([self.pane], named)
+        self.assertEqual(self.renames, ["Fix login | api"])
+        self.pane.update(terminal_title="New session | api", terminal_title_stripped="New session | api")
+        herdr_agents.tabs([self.pane], named)
+        self.assertEqual(self.tab["label"], "New session | api")
+        # Restarting the ticker keeps ownership of the name it assigned.
+        herdr_agents.tabs([self.pane], {})
+        self.assertEqual(self.tab["label"], "New session | api")
+
+    def test_approval_status_does_not_become_session_name(self):
+        named = {}
+        for marker in ("!", "."):
+            title = "[ %s ] Action Required | Fix login | api" % marker
+            self.pane.update(terminal_title=title, terminal_title_stripped=title)
+            herdr_agents.tabs([self.pane], named)
+            self.assertEqual(self.tab["label"], "Fix login | api")
+            self.assertEqual(self.pane["tokens"]["session_title"], "Fix login | api")
+        self.assertEqual(self.renames, ["Fix login | api"])
+
+    def test_manual_tab_name_is_preserved(self):
+        named = {}
+        herdr_agents.tabs([self.pane], named)
+        self.tab["label"] = "My tab"
+        self.pane["terminal_title_stripped"] = "New session | api"
+        herdr_agents.tabs([self.pane], named)
+        self.assertEqual(self.tab["label"], "My tab")
+        herdr_agents.tabs([], named)
+        self.assertEqual(self.tab["label"], "My tab")
+
+    def test_multiple_agents_do_not_rename_tab(self):
+        other = dict(self.pane, pane_id="w1:p2", agent="claude")
+        herdr_agents.tabs([self.pane, other], {})
+        self.assertEqual(self.renames, [])
+
+    def test_codex_exit_releases_tab_number(self):
+        named = {}
+        herdr_agents.tabs([self.pane], named)
+        herdr_agents.tabs([], named)
+        self.assertEqual(self.tab["label"], "1")
+        self.assertEqual(named, {})
+
+    def test_claude_to_codex_keeps_automatic_naming(self):
+        named = {}
+        claude = dict(self.pane, agent="claude", terminal_title="✳ Fix docs",
+                      terminal_title_stripped="Fix docs")
+        herdr_agents.tabs([claude], named)
+        self.assertEqual(self.tab["label"], "Fix docs")
+        herdr_agents.tabs([self.pane], named)
+        self.assertEqual(self.tab["label"], "Fix login | api")
+        # An ordinary shell title still must not rename a departing Claude pane.
+        claude.update(terminal_title="bash", terminal_title_stripped="bash")
+        herdr_agents.tabs([claude], named)
+        self.assertEqual(self.tab["label"], "Fix login | api")
 
 
 if __name__ == "__main__":

@@ -6,23 +6,24 @@
 onboarding = false
 
 [ui]
-# New tabs open at once with herdr's generated number, no name prompt. A Claude Code tab then
-# takes its session's name from herdr-agents; rename any other with the rename-tab key.
+# New tabs open at once with herdr's generated number, no name prompt. Claude Code and Codex
+# tabs then take their session names from herdr-agents; rename others with the rename-tab key.
 prompt_new_tab_name = false
-# The outer terminal's title: the host, the workspace and the tab, which for a Claude Code tab
+# The outer terminal's title: the host, the workspace and the tab, which for a supported agent
 # is the session's name.
 window_title = "{hostname}: {workspace} · {tab}"
 
 # The agents sidebar, three rows for each agent pane.
 #
-# A Claude Code pane: the folder it runs in ($place, where herdr's own `workspace` names the
+# A Claude Code or Codex pane: its folder ($place, where herdr's own `workspace` names the
 # folder its workspace was opened in), how long ago it last did something ($last_active: now,
 # 7m, 5h, 3d) and the context its session holds ($context: 53k); then the session's name, which
-# Claude Code writes into its terminal title; then its last shell command, dimmed, and the last
+# the agent writes into its terminal title; then its last shell command, dimmed, and the last
 # line of that command's output ($last_cmd, $last_out): "…" while it runs, "✗" if it failed.
-# Codex and pi keep herdr's default rows, with $place for the workspace, and get the context and
-# the last command too.
+# Codex's $session_title also removes its temporary "Action Required" prefix.
+# pi keeps herdr's default rows, with $place for the workspace, and gets the context and the
+# last command too.
 [ui.sidebar.agents.rows_by_agent]
 claude = [["state_icon", "machine", "$place", "$last_active", "$context"], ["terminal_title_stripped"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
-codex = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
+codex = [["state_icon", "machine", "$place", "$last_active", "$context"], ["$session_title"], [{ token = "$last_cmd", dim = true }, "$last_out"]]
 pi = [["state_icon", "machine", "$place", "tab", "$context"], ["agent"], [{ token = "$last_cmd", dim = true }, "$last_out"]]

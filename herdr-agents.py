@@ -5,7 +5,7 @@
 # A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does five things in
 # the herdr server the pane belongs to:
 #
-# - Reports how long ago each Claude Code session last did something as the pane token
+# - Reports how long ago each Claude Code or Codex session last did something as the pane token
 #   $last_active, which herdr's sidebar rows can show (config.toml): now, 7m, 5h, 3d,
 #   and "now" for as long as herdr sees it at work. The time itself is kept in $last_active_at.
 #   A pane with no time yet takes it from its transcript's last message.
@@ -18,16 +18,16 @@
 #   herdr's pi integration names. A command still running shows "…", one that failed "✗".
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
 #   tokens of its last model call to the thousand (5k, 120k).
-# - Names a Claude Code pane's tab as its sidebar row names it: the name in Claude Code's
-#   terminal title, "Claude Code" until the session has one, then the title Claude Code gives
-#   it or the /rename one. A new session in the same tab renames it again. When Claude Code
+# - Names a Claude Code or Codex pane's tab as its sidebar row names it: the session name in
+#   the agent's terminal title, including names set with /rename.
+#   A new session in the same tab renames it again. When the agent
 #   has gone from the tab (quit, or a shell or another agent in its place), the tab takes
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
 #   generated number or the name this gave it, so a tab renamed by hand keeps its name.
 #
 # The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all five
 # current: every two seconds it rereads the logs that have grown, redoes the ages that have
-# moved on, follows each Claude pane's title into its tab, and starts itself again when this
+# moved on, follows each supported pane's title into its tab, and starts itself again when this
 # file changes. It exits when the server has been gone for two minutes; the next hook starts a
 # new one.
 #
@@ -89,11 +89,24 @@ def entries(path, size=1 << 20):
             pass
 
 
-def last_message_at(path):
+def last_message_at(path, agent="claude"):
     for e in entries(path):
-        if e.get("type") in ("user", "assistant") and e.get("timestamp"):
-            stamp = e["timestamp"].replace("Z", "+00:00")  # fromisoformat before 3.11
-            return datetime.datetime.fromisoformat(stamp).timestamp()
+        relevant = e.get("type") in ("user", "assistant")
+        if agent == "codex":
+            p = e.get("payload") or {}
+            relevant = (
+                e.get("type") == "event_msg" and p.get("type") in (
+                    "task_started", "task_complete", "turn_aborted", "user_message",
+                    "agent_message", "item_started", "item_completed")
+                or e.get("type") == "response_item" and p.get("type") in (
+                    "message", "function_call", "function_call_output",
+                    "custom_tool_call", "custom_tool_call_output"))
+        if relevant and e.get("timestamp"):
+            try:
+                stamp = e["timestamp"].replace("Z", "+00:00")  # fromisoformat before 3.11
+                return datetime.datetime.fromisoformat(stamp).timestamp()
+            except (ValueError, TypeError, AttributeError):
+                pass
     return None
 
 
@@ -113,30 +126,48 @@ def label(at, now):
     return "%dd" % (minutes // (24 * 60))
 
 
-def report(pane, at, now):
+def report(pane, at, now, agent="claude"):
     call("pane.report_metadata", {
-        "pane_id": pane, "source": SOURCE, "agent": "claude", "seq": time.time_ns(),
-        "tokens": {"last_active": label(at, now), "last_active_at": "%d" % at}})
+        "pane_id": pane, "source": SOURCE, "agent": agent, "seq": time.time_ns(),
+        "tokens": {"last_active": label(at, now) if at else None,
+                   "last_active_at": "%d" % at if at else None}})
 
 
-def refresh(agents, now, skip=None):
-    """Rewrite every other Claude pane's label that has moved on. A pane herdr sees at work is
-    active now: its time is moved up once a minute, so it stays "now" until the Stop hook."""
+def refresh(agents, now, skip=None, cache=None):
+    """Keep Claude and Codex ages current. Codex has no hook, so its own log supplies the time,
+    even when the pane still carries tokens from a previous session."""
+    if cache is None:
+        cache = {}
     for a in agents:
-        if a.get("agent") != "claude" or a is skip:
+        agent = a.get("agent")
+        if agent not in ("claude", "codex") or a is skip:
             continue
         tokens = a.get("tokens") or {}
-        try:
-            at = float(tokens["last_active_at"])
-        except (KeyError, ValueError):
-            found = transcript((a.get("agent_session") or {}).get("value") or "-")
-            at = found and last_message_at(found)
+        if agent == "codex":
+            path = session_log(a, cache)
+            key = ("activity", a["pane_id"])
+            signature = stamp(path)
+            if key not in cache or cache[key][0] != signature:
+                try:
+                    at = last_message_at(path, agent) if path else None
+                except OSError:
+                    at = None
+                cache[key] = (signature, at)
+            at = cache[key][1]
+        else:
+            try:
+                at = float(tokens["last_active_at"])
+            except (KeyError, ValueError, TypeError):
+                found = transcript((a.get("agent_session") or {}).get("value") or "-")
+                at = found and last_message_at(found)
         if a.get("agent_status") == "working" and now - (at or 0) >= 60:
             at = now
-        if not at:
+        if not at and agent == "claude":
             continue
-        if tokens.get("last_active") != label(at, now) or tokens.get("last_active_at") != "%d" % at:
-            report(a["pane_id"], at, now)
+        age = label(at, now) if at else None
+        epoch = "%d" % at if at else None
+        if tokens.get("last_active") != age or tokens.get("last_active_at") != epoch:
+            report(a["pane_id"], at, now, agent)
 
 
 # The last shell command. Each reader returns (command, output, failed, follow), or None when
@@ -426,7 +457,7 @@ def tick():
         try:
             agents = call("agent.list", {}).get("agents", [])
             reached = time.time()
-            refresh(agents, reached)
+            refresh(agents, reached, cache=cache)
             places(agents)
             commands(agents, seen, cache)
             tabs(agents, named)
@@ -475,6 +506,16 @@ def claude_title(a):
     return name if name and name != raw else None
 
 
+def codex_title(a):
+    """Codex keeps its session title when idle, without the working spinner herdr strips."""
+    name = (a.get("terminal_title_stripped") or "").strip()
+    # Older herdr versions leave Codex's temporary approval status in the stripped title.
+    return re.sub(r"^\[[^]]*\]\s*Action Required\s*\|\s*", "", name).strip() or None
+
+
+TITLES = {"claude": claude_title, "codex": codex_title}
+
+
 def alone(a, agents):
     return sum(b.get("tab_id") == a.get("tab_id") for b in agents) == 1
 
@@ -494,9 +535,9 @@ def name_tab(me, agents, name):
 
 
 def release_tabs(agents):
-    """herdr's number back on each tab this named whose Claude Code has gone; the number is the
+    """herdr's number back on each tab this named whose supported agent has gone; the number is the
     tab's place in its workspace, which herdr names a new tab by."""
-    held = {a.get("tab_id") for a in agents if a.get("agent") == "claude"}
+    held = {a.get("tab_id") for a in agents if a.get("agent") in TITLES}
     mine = SOCK + " "
     with given_names() as given:
         for key in [k for k in given if k.startswith(mine) and k[len(mine):] not in held]:
@@ -511,13 +552,17 @@ def release_tabs(agents):
 
 
 def tabs(agents, named):
-    """Keep each Claude tab named as its title. A pane is looked at again when its title, its
+    """Keep each Claude or Codex tab named as its title. Look again when its title, its
     tab or the agents beside it change."""
-    claude = [a for a in agents if a.get("agent") == "claude"]
-    for pane in set(named) - {a["pane_id"] for a in claude}:
-        del named[pane]  # gone: a new Claude Code there, even with the same session, renames
-    for a in claude:
-        name = claude_title(a)
+    supported = [a for a in agents if a.get("agent") in TITLES]
+    for pane in set(named) - {a["pane_id"] for a in supported}:
+        del named[pane]  # gone: a new agent there, even with the same session, renames
+    for a in supported:
+        name = TITLES[a["agent"]](a)
+        if a["agent"] == "codex" and (a.get("tokens") or {}).get("session_title") != name:
+            call("pane.report_metadata", {
+                "pane_id": a["pane_id"], "source": SOURCE, "agent": "codex", "seq": time.time_ns(),
+                "tokens": {"session_title": name}})
         seen = (a.get("tab_id"), name, alone(a, agents))
         if name and named.get(a["pane_id"]) != seen:
             name_tab(a, agents, name)
