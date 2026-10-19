@@ -88,6 +88,18 @@ class Format(unittest.TestCase):
             self.assertEqual(herdr_agents.place({"cwd": "/home/u/src/api/", "foreground_cwd": "/srv/web"}), "web")
             self.assertIsNone(herdr_agents.place({}))
 
+    def test_icon_place(self):
+        reports = []
+        panes = [{"agent": "claude", "pane_id": "p1", "cwd": "/src/api"},
+                 {"agent": "pi", "pane_id": "p2"},
+                 {"agent": "codex", "pane_id": "p3", "cwd": "/src/docs",
+                  "tokens": {"place": "docs", "icon_place": "🌀 docs"}}]
+        with mock.patch.object(herdr_agents, "call", lambda m, p: reports.append(p) or {}):
+            herdr_agents.places(panes)
+        self.assertEqual([(r["pane_id"], r["tokens"]) for r in reports],
+                         [("p1", {"place": "api", "icon_place": "🦀 api"}),
+                          ("p2", {"place": None, "icon_place": "🥧"})])
+
 
 class Claude(Logs):
     def test_last_command(self):
@@ -273,7 +285,7 @@ class Tabs(Logs):
             self.renames.append(params["label"])
             return {}
         if method == "pane.report_metadata":
-            self.assertEqual(params["agent"], "codex")
+            self.assertIn(params["agent"], ("codex", "pi"))
             if params["pane_id"] == self.pane["pane_id"]:
                 self.pane.setdefault("tokens", {}).update(params["tokens"])
             return {}
@@ -340,12 +352,14 @@ class Tabs(Logs):
 
     def test_pi_title_names_tab(self):
         named = {}
-        pi = dict(self.pane, agent="pi", terminal_title="π - api", terminal_title_stripped="π - api")
+        pi = self.pane
+        pi.update(agent="pi", terminal_title="π - api", terminal_title_stripped="π - api")
         herdr_agents.tabs([pi], named)
         self.assertEqual(self.tab["label"], "🥧 api")
         pi.update(terminal_title="π - Fix docs - api", terminal_title_stripped="π - Fix docs - api")
         herdr_agents.tabs([pi], named)
         self.assertEqual(self.tab["label"], "🥧 Fix docs - api")
+        self.assertEqual(pi["tokens"]["session_title"], "Fix docs - api")
         # The shell's title as pi quits is not a session name.
         pi.update(terminal_title="bash", terminal_title_stripped="bash")
         herdr_agents.tabs([pi], named)

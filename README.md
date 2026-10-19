@@ -8,10 +8,10 @@ named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀
 `🥧 Fix tests - api`.
 
 ```
-● api · now · 57k
+● 🦀 api · now · 57k
   Fix the flaky login test
   $ pytest -q tests/test_login.py · ✗ FAILED tests/test_login.py::test_redirect
-○ docs · 3h · 12k
+○ 🌀 docs · 3h · 12k
   Changelog for 2.4
   $ git status --short · ✓
 ```
@@ -84,11 +84,10 @@ config takes effect at the next `herdr server reload-config`.
 [config.toml](config.toml), with a comment on each setting:
 
 - **The agents sidebar** (`[ui.sidebar.agents.rows_by_agent]`): three rows for each agent pane.
-  Claude Code and Codex panes show their folder, age and context on the first row, the session's
-  name on the second, and the last command with its last line of output on the third. pi
-  panes keep herdr's default first two rows (the workspace and the tab, then the agent's
-  name), with the folder in place of the workspace, and get the context and the last command
-  too. The values are in [What it shows](#what-it-shows).
+  Each pane shows the agent's emoji (🦀 Claude Code, 🌀 Codex, 🥧 pi) with its folder, then
+  its age and context, on the first row, the session's name on the second, and the last command
+  with its last line of output on the third. pi has no age. The values are in
+  [What it shows](#what-it-shows).
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
   of asking for a name. Claude Code, Codex and pi tabs then take their session names by themselves
   ([Tab names](#tab-names)); other tabs keep their numbers until you rename them.
@@ -103,7 +102,8 @@ Each value is a pane token, which herdr's sidebar rows name with a `$`:
 | Token | Agents | What it is |
 |---|---|---|
 | `$place` | Claude Code, Codex, pi | The name of the folder the agent runs in (`~` for the home folder). herdr's own `workspace` names the folder the tab's workspace was opened in, which is wrong for a tab started elsewhere. |
-| `$session_title` | Codex | Its session name from the terminal title, with the working spinner and temporary `Action Required` prefix removed. Used for the sidebar and automatic tab name. |
+| `$icon_place` | Claude Code, Codex, pi | The agent's emoji and `$place`: `🦀 api`, `🌀 docs`, `🥧 api`. One token, because herdr puts ` · ` between a row's tokens everywhere but after the state dot, so it reads `● 🦀 api`. |
+| `$session_title` | Codex, pi | Its session name from the terminal title: Codex's with the working spinner and temporary `Action Required` prefix removed, pi's without its `π - `. Used for the sidebar and automatic tab name. |
 | `$last_active` | Claude Code, Codex | How long ago the session last did something: `now`, `7m`, `5h`, `3d`. It reads `now` for as long as herdr sees the agent at work. A resumed session shows the time of its last message, so herdr restoring its panes does not make them all look active. Codex's time comes from its current rollout, including turn completion and command events; a fresh session with no log has no age yet. The time itself is in `$last_active_at` (Unix seconds). |
 | `$context` | Claude Code, Codex, pi | The context the session holds, to the thousand: `5k`, `120k`. It is the tokens of the last model call, input and reply, as each agent counts them for its own gauge: Claude Code's usage with the cache, Codex's `last_token_usage.total_tokens`, pi's `totalTokens`. Empty before the first reply, and after a compaction until the next reply, except in Claude Code, whose compaction records what it left. |
 | `$last_cmd` | Claude Code, Codex, pi | The last shell command, `$ ` and its first line, without a leading `cd <dir> &&`. |
@@ -115,8 +115,8 @@ context, which stay whole.
 ### Tab names
 
 Claude Code, Codex and pi tabs take the session names in their terminal titles, including names
-set with `/rename`, after an emoji for the agent: 🦀 Claude Code, 🌀 Codex, 🥧 pi. For Claude Code
-and Codex that is the name their sidebar rows show. Codex's temporary `Action Required` prefix
+set with `/rename`, after an emoji for the agent: 🦀 Claude Code, 🌀 Codex, 🥧 pi: the name
+their sidebar rows show. Codex's temporary `Action Required` prefix
 is removed, and so is pi's `π - `. Claude Code starts with "Claude Code";
 Codex may show its folder until it generates a session title; pi shows its folder after the
 session name, or alone until the session has one. A new session in the same tab renames it

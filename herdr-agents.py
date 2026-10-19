@@ -11,7 +11,7 @@
 #   A pane with no time yet takes it from its transcript's last message.
 # - Reports the folder each agent pane runs in as $place, for Claude Code, Codex and pi: the
 #   pane's working directory by name, where herdr's workspace label would name the folder the
-#   workspace was opened in.
+#   workspace was opened in. And as $icon_place after the agent's emoji: 🦀 api.
 # - Reports each agent pane's last shell command and the last line of its output as $last_cmd
 #   and $last_out, for Claude Code, Codex and pi alike, read from the agent's own session log:
 #   Claude Code's transcript, the Codex rollout its process holds open, the pi session file
@@ -419,11 +419,18 @@ def place(a):
 
 
 def places(agents):
+    """Each agent pane's folder as $place, and as $icon_place after the agent's emoji (🦀 api):
+    herdr puts " · " between a row's tokens except after the state dot, so the two are one."""
     for a in agents:
-        if a.get("agent") in READERS and (a.get("tokens") or {}).get("place") != place(a):
+        if a.get("agent") not in READERS:
+            continue
+        icon, where = ICONS[a["agent"]], place(a)
+        tokens = {"place": where, "icon_place": "%s %s" % (icon, where) if where else icon}
+        have = a.get("tokens") or {}
+        if any(have.get(k) != v for k, v in tokens.items()):
             call("pane.report_metadata", {
                 "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": {"place": place(a)}})
+                "tokens": tokens})
 
 
 def ticker_lock():
@@ -523,7 +530,7 @@ def pi_title(a):
 
 
 TITLES = {"claude": claude_title, "codex": codex_title, "pi": pi_title}
-# Before each tab name, which agent holds the tab. Each takes two cells in any terminal.
+# Which agent it is, before each tab name and the pane's folder. Two cells in any terminal.
 ICONS = {"claude": "🦀", "codex": "🌀", "pi": "🥧"}
 
 
@@ -571,9 +578,9 @@ def tabs(agents, named):
         del named[pane]  # gone: a new agent there, even with the same session, renames
     for a in supported:
         name = TITLES[a["agent"]](a)
-        if a["agent"] == "codex" and (a.get("tokens") or {}).get("session_title") != name:
+        if a["agent"] in ("codex", "pi") and (a.get("tokens") or {}).get("session_title") != name:
             call("pane.report_metadata", {
-                "pane_id": a["pane_id"], "source": SOURCE, "agent": "codex", "seq": time.time_ns(),
+                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
                 "tokens": {"session_title": name}})
         seen = (a.get("tab_id"), name, alone(a, agents))
         if name and named.get(a["pane_id"]) != seen:
