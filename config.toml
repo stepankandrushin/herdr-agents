@@ -24,7 +24,12 @@ window_title = "{hostname}: {workspace} · {tab}"
 # $session_title also removes its temporary "Action Required" prefix, pi's its "π - ". pi has no
 # age. For the last shell command and its output's last line instead, the third row can be
 # [{ token = "$last_cmd", dim = true }, "$last_out"].
+#
+# Claude Code's sub-agents, while any run: how many at the end of the first row ($subagents:
+# ◐ 2, yellow like herdr's working dot, since the session's own dot shows done or idle once its
+# turn ends), then a row for each, up to three: ├ its task · what it is doing now. Rows with
+# nothing in them are left out, so these are there only while sub-agents run.
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["terminal_title_stripped"], ["$last_message"]]
+claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context", { token = "$subagents", fg = "#f9e2af" }], ["terminal_title_stripped"], ["$last_message"], ["$subagent_1"], ["$subagent_2"], ["$subagent_3"]]
 codex = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]
 pi = [["state_icon", "machine", "$icon_place", "$context"], ["$session_title"], ["$last_message"]]

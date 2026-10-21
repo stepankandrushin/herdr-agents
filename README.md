@@ -4,7 +4,8 @@ How I run Claude Code, Codex and pi side by side in [herdr](https://herdr.dev): 
 and a small program that adds to herdr's agents sidebar, for each agent pane, the folder it runs
 in, how long ago it last did something, how much context its session holds, and the start of
 its last message to you (or the last shell command it ran, with the last line of that command's
-output). Claude Code, Codex and pi tabs are
+output); for Claude Code also the sub-agents still running in it, each with its task and what
+it is doing. Claude Code, Codex and pi tabs are
 named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀 Fix login | api`,
 `🥧 Fix tests - api`.
 
@@ -12,6 +13,11 @@ named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀
 ● 🦀 api · now · 57k
   Fix the flaky login test
   The redirect test fails only when the session cookie is older than the token, so I'm …
+○ 🦀 docs · 2m · 92k · ◐ 2
+  Release notes for 2.4
+  Both agents are running; I'll report when they finish.
+  ├ Check the changelog links · Fetching docs.example.com
+  └ Draft the upgrade guide · Editing upgrade.md
 ○ 🌀 docs · 3h · 12k
   Changelog for 2.4
   Committed the 2.4 changelog on main; the release notes link to it.
@@ -20,6 +26,8 @@ named after their sessions, with the agent's emoji first: `🦀 Fix docs`, `🌀
 With a dozen agents open, herdr shows that each one exists and whether it is working. This adds
 what you would otherwise switch tabs to find out: which project it is in, whether it finished a
 minute ago or yesterday, whether its context is close to full, and what it is doing right now.
+A Claude Code session whose turn has ended shows as done or idle while the sub-agents it started
+in the background work on; `◐ 2` and a row for each say that it is still at work, and on what.
 
 Two files do it:
 
@@ -87,7 +95,10 @@ config takes effect at the next `herdr server reload-config`.
 - **The agents sidebar** (`[ui.sidebar.agents.rows_by_agent]`): three rows for each agent pane.
   Each pane shows the agent's emoji (🦀 Claude Code, 🌀 Codex, 🥧 pi) with its folder, then
   its age and context, on the first row, the session's name on the second, and the start of its
-  last message to you on the third. pi has no age. The values are in
+  last message to you on the third. pi has no age. A Claude Code pane with sub-agents running
+  adds their number to the first row (`◐ 2`, yellow like herdr's working dot) and a row
+  for each, up to three; herdr leaves out a row with nothing in it, so the rows are there only
+  while sub-agents run. The values are in
   [What it shows](#what-it-shows). A comment there gives the third row that shows the last
   command and its output instead.
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
@@ -109,6 +120,8 @@ Each value is a pane token, which herdr's sidebar rows name with a `$`:
 | `$last_active` | Claude Code, Codex | How long ago the session last did something: `now`, `7m`, `5h`, `3d`. It reads `now` for as long as herdr sees the agent at work. A resumed session shows the time of its last message, so herdr restoring its panes does not make them all look active. Codex's time comes from its current rollout, including turn completion and command events; a fresh session with no log has no age yet. The time itself is in `$last_active_at` (Unix seconds). |
 | `$context` | Claude Code, Codex, pi | The context the session holds, to the thousand: `5k`, `120k`. It is the tokens of the last model call, input and reply, as each agent counts them for its own gauge: Claude Code's usage with the cache, Codex's `last_token_usage.total_tokens`, pi's `totalTokens`. Empty before the first reply, and after a compaction until the next reply, except in Claude Code, whose compaction records what it left. |
 | `$last_message` | Claude Code, Codex, pi | The start of the agent's last message to you, on one line: the text it wrote last, between tool calls or at the end of its turn, with markdown's marks (`**`, backticks, headings, list bullets, link targets) removed. herdr cuts it to the sidebar's width. For pi, a turn that ended without a reply shows pi's reason: `Operation aborted`, `Request timed out.` Empty before the first message. |
+| `$subagents` | Claude Code | How many sub-agents run in the session, `◐ 2`; empty when none. A sub-agent runs from its launch until Claude Code marks it finished (done, failed or stopped), and again while a message wakes it. The session's own state dot shows done or idle once its turn has ended, though its background sub-agents work on. |
+| `$subagent_1` … `$subagent_3` | Claude Code | A row for each running sub-agent, the first launched first: `├`, its task as the session described it, and what it is doing now, its newest tool call in words (`Editing auth.py`, `Searching TODO`, a command's description) or the text it wrote since: `├ Fix the login test · Editing auth.py`. The last one starts with `└`. With more than three running, the third reads `└ 2 more`. On a narrow sidebar herdr cuts the row after the task. |
 | `$last_cmd` | Claude Code, Codex, pi | The last shell command, `$ ` and its first line, without a leading `cd <dir> &&`. |
 | `$last_out` | Claude Code, Codex, pi | The last line of that command's output that has a letter or digit in it. `…` while the command runs, `✗ <line>` if it failed, `✓` if it printed nothing. For a Claude Code background command or an output too long for the transcript, it is read from the file the output went to, so a long job shows its current line. |
 
@@ -141,6 +154,13 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   `/proc/<pid>/fd`, or with `lsof` on macOS, there at most once in 30 seconds), and the pi
   session file herdr's pi integration reports. It reads the last megabyte of a log only, about
   a millisecond even for a log of tens of megabytes.
+- For a Claude Code session's sub-agents it reads the folder beside the transcript,
+  `<session>/subagents/`: each sub-agent's `agent-<id>.meta.json` (its task, and the `finished`
+  mark Claude Code sets when it ends) and its own log `agent-<id>.jsonl`, the end of it, for what
+  it is doing. A sub-agent without the mark whose log has not grown since the pane's Claude Code
+  started was left by a run that quit or crashed, and does not count; the start comes from
+  `ps -o etime=` on the process herdr reports. Claude Code versions without the mark: a
+  sub-agent counts until its log ends with a finished reply.
 - It exits two minutes after the herdr server has gone; the next hook starts a new one. It
   restarts itself when `herdr-agents.py` changes.
 - It talks to herdr over its socket (`HERDR_SOCKET_PATH`), the same way herdr's own integrations

@@ -168,6 +168,111 @@ class Claude(Logs):
         self.assertEqual(herdr_agents.last_message_at(path), 1767323045)
 
 
+def tool(name, **args):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t", "name": name, "input": args}], "stop_reason": "tool_use"}}
+
+
+def done(text):
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}], "stop_reason": "end_turn"}}
+
+
+class Subagents(Logs):
+    def subagent(self, id, meta, *events, at="2026-01-02T03:04:05.000Z", age=0):
+        folder = os.path.join(self.tmp.name, "s1", "subagents")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "agent-%s.meta.json" % id), "w") as f:
+            json.dump(meta, f)
+        log = self.log(dict(say("start"), type="user", timestamp=at), *events,
+                       name=os.path.join("s1", "subagents", "agent-%s.jsonl" % id))
+        os.utime(log, (1_000_000 - age, 1_000_000 - age))
+        return log
+
+    def running(self, started=1_000_000 - 60):
+        transcript = self.log(say("main"), name="s1.jsonl")
+        with mock.patch.object(herdr_agents, "claude_started", return_value=started):
+            return herdr_agents.running_subagents("w1:p1", transcript, {})
+
+    def test_tool_calls_in_words(self):
+        action = lambda name, **args: herdr_agents.action(tool(name, **args)["message"]["content"][0])
+        self.assertEqual(action("Read", file_path="/src/api/notes.md"), "Reading notes.md")
+        self.assertEqual(action("Edit", file_path="/src/api/auth.py", old_string="a"), "Editing auth.py")
+        self.assertEqual(action("Grep", pattern="TODO", path="/src"), "Searching TODO")
+        self.assertEqual(action("WebFetch", url="https://docs.python.org/3/x.html"), "Fetching docs.python.org")
+        self.assertEqual(action("Bash", command="pytest -q", description="Run the tests"), "Run the tests")
+        self.assertEqual(action("Bash", command="cd /src/api && pytest -q\nmore"), "$ pytest -q")
+        self.assertEqual(action("mcp__browser__click", ref="e1"), "click")
+
+    def test_doing_is_the_newest_call_or_text(self):
+        log = self.subagent("a1", {}, tool("Read", file_path="/a/b.py"), bash_result("t", "x"))
+        self.assertEqual(herdr_agents.subagent_state(log), (False, "Reading b.py"))
+        log = self.subagent("a2", {}, tool("Read", file_path="/a/b.py"), say("Now the tests."))
+        self.assertEqual(herdr_agents.subagent_state(log), (False, "Now the tests."))
+        log = self.subagent("a3", {}, tool("Read", file_path="/a/b.py"), done("All **done**."))
+        self.assertEqual(herdr_agents.subagent_state(log), (True, "All done."))
+
+    def test_running_ones_first_launched_first(self):
+        self.subagent("b", {"description": "Check the docs"}, tool("Grep", pattern="TODO"),
+                      at="2026-01-02T03:05:00.000Z")
+        self.subagent("a", {"description": "Fix the login test"}, tool("Edit", file_path="/s/auth.py"),
+                      bash_result("t", "ok"), at="2026-01-02T03:04:00.000Z")
+        self.subagent("c", {"description": "Finished", "finished": True}, tool("Read", file_path="/x"))
+        self.assertEqual(self.running(), [("Fix the login test", "Editing auth.py"), ("Check the docs", "Searching TODO")])
+
+    def test_woken_again_runs(self):
+        self.subagent("a", {"description": "Fix", "revivedAt": 1}, done("Done."), bash_result("t", "more"))
+        self.assertEqual(self.running(), [("Fix", "Done.")])
+
+    def test_ended_turn_without_finished_mark_is_not_running(self):
+        self.subagent("a", {"description": "Fix"}, tool("Read", file_path="/x"), done("Done."))
+        self.assertEqual(self.running(), [])
+
+    def test_left_by_an_earlier_run_is_not_running(self):
+        self.subagent("a", {"description": "Fix"}, tool("Read", file_path="/x"), age=3600)
+        self.assertEqual(self.running(started=1_000_000 - 60), [])
+        self.assertEqual(self.running(started=1_000_000 - 7200), [("Fix", "Reading x")])
+
+    def test_no_subagents(self):
+        self.assertEqual(self.running(), [])
+
+    def test_tokens(self):
+        none = herdr_agents.subagent_tokens([])
+        self.assertEqual(none, {"subagents": None, "subagent_1": None, "subagent_2": None, "subagent_3": None})
+        two = herdr_agents.subagent_tokens([("Fix the login test", "Editing auth.py"), ("Check the docs", None)])
+        self.assertEqual(two, {"subagents": "◐ 2", "subagent_1": "├ Fix the login test · Editing auth.py",
+                               "subagent_2": "└ Check the docs", "subagent_3": None})
+        five = herdr_agents.subagent_tokens([("t%d" % i, None) for i in range(5)])
+        self.assertEqual([five["subagents"], five["subagent_1"], five["subagent_2"], five["subagent_3"]],
+                         ["◐ 5", "├ t0", "├ t1", "└ 3 more"])
+
+    def test_reported_and_cleared(self):
+        transcript = self.log(say("main"), name="s1.jsonl")
+        self.subagent("a", {"description": "Fix"}, tool("Read", file_path="/x"))
+        pane = {"agent": "claude", "pane_id": "w1:p1"}
+        with mock.patch.object(herdr_agents, "session_log", return_value=transcript), \
+                mock.patch.object(herdr_agents, "claude_started", return_value=0), \
+                mock.patch.object(herdr_agents, "call") as call:
+            herdr_agents.subagents([pane], {})
+            self.assertEqual(call.call_args.args[1]["tokens"]["subagent_1"], "└ Fix · Reading x")
+            pane["tokens"] = call.call_args.args[1]["tokens"]
+            call.reset_mock()
+            herdr_agents.subagents([pane], {})
+            call.assert_not_called()  # unchanged
+            with open(os.path.join(self.tmp.name, "s1", "subagents", "agent-a.meta.json"), "w") as f:
+                json.dump({"description": "Fix", "finished": True}, f)
+            herdr_agents.subagents([pane], {})
+            self.assertEqual(call.call_args.args[1]["tokens"]["subagents"], None)
+
+    def test_process_start(self):
+        for etime, seconds in (("05:03", 303), ("02:00:01", 7201), ("1-00:00:10", 86410)):
+            run = mock.Mock(return_value=mock.Mock(stdout="  %s\n" % etime))
+            with mock.patch.object(herdr_agents.subprocess, "run", run), \
+                    mock.patch.object(herdr_agents.time, "time", return_value=1_000_000):
+                self.assertEqual(herdr_agents.process_start(42), 1_000_000 - seconds)
+        with mock.patch.object(herdr_agents.subprocess, "run", return_value=mock.Mock(stdout="")):
+            self.assertIsNone(herdr_agents.process_start(42))
+
+
 class Codex(Logs):
     def test_activity_uses_completion_and_ignores_restore_metadata(self):
         path = self.log(

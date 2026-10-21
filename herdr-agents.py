@@ -2,7 +2,7 @@
 # herdr-agents: more in herdr's agents sidebar for Claude Code, Codex and pi panes.
 # https://github.com/stepankandrushin/herdr-agents, MIT license. README.md says how to install it.
 #
-# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does six things in
+# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does seven things in
 # the herdr server the pane belongs to:
 #
 # - Reports how long ago each Claude Code or Codex session last did something as the pane token
@@ -20,6 +20,9 @@
 #   same log, as $last_message: Done, tests pass and the fix is committed…
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
 #   tokens of its last model call to the thousand (5k, 120k).
+# - Reports the sub-agents running in each Claude Code pane, which go on after the session's own
+#   turn has ended: how many as $subagents (◐ 2), and each one's task and what it is doing now
+#   as $subagent_1 to $subagent_3: ├ Fix the login test · Editing auth.py.
 # - Names a Claude Code, Codex or pi pane's tab as the agent's emoji (🦀 Claude Code, 🌀 Codex,
 #   🥧 pi) and the session name in its terminal title, including names set with /rename.
 #   A new session in the same tab renames it again. When the agent
@@ -27,7 +30,7 @@
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
 #   generated number or the name this gave it, so a tab renamed by hand keeps its name.
 #
-# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all six
+# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all seven
 # current: every two seconds it rereads the logs that have grown, redoes the ages that have
 # moved on, follows each supported pane's title into its tab, and starts itself again when this
 # file changes. It exits when the server has been gone for two minutes; the next hook starts a
@@ -465,6 +468,165 @@ def commands(agents, seen, cache):
                 "tokens": tokens})
 
 
+# Claude Code's sub-agents. Each one writes its own log beside the session's transcript,
+# <session>/subagents/agent-<id>.jsonl, and a meta file there with its task's description, which
+# Claude Code marks "finished" when it ends: done, failed or stopped. SendMessage can wake a
+# finished one, which takes the mark away again.
+
+SUBAGENT_ROWS = 3  # $subagent_1 to $subagent_3; with more running, the last says how many more
+VERBS = {"Read": "Reading", "Edit": "Editing", "MultiEdit": "Editing", "NotebookEdit": "Editing",
+         "Write": "Writing", "Grep": "Searching", "Glob": "Finding", "WebFetch": "Fetching",
+         "WebSearch": "Searching the web for"}
+
+
+def action(c):
+    """A tool call in words, the way Claude Code lists its agents: Editing notes.md, Searching
+    TODO, or the call's own description (a Bash command's)."""
+    name, args = c.get("name") or "", c.get("input") or {}
+    target = next((args[k] for k in ("file_path", "notebook_path", "pattern", "query", "url")
+                   if isinstance(args.get(k), str) and args[k]), None)
+    if name in VERBS and target:
+        if "file_path" in args or "notebook_path" in args:
+            target = os.path.basename(target)
+        elif name == "WebFetch":
+            target = re.sub(r"^\w+://([^/]+).*", r"\1", target)
+        return "%s %s" % (VERBS[name], target)
+    if args.get("description"):
+        return args["description"]
+    if isinstance(args.get("command"), str) and args["command"].strip():
+        return "$ " + CD.sub("", one_line(args["command"].strip().splitlines()[0]))
+    return name.split("__")[-1] or None  # mcp__server__tool
+
+
+def subagent_state(path):
+    """(ended, doing): whether the sub-agent's last reply ended its turn, for Claude Code
+    versions without the finished mark, and what it is doing: its newest tool call, or the text
+    it wrote since."""
+    ended = None
+    for e in entries(path, 1 << 18):
+        m = e.get("message") or {}
+        if e.get("type") not in ("assistant", "user"):
+            continue
+        if ended is None:
+            ended = e["type"] == "assistant" and m.get("stop_reason") not in (None, "tool_use")
+        if e["type"] != "assistant" or not isinstance(m.get("content"), list):
+            continue
+        for c in reversed(m["content"]):
+            if c.get("type") == "tool_use":
+                return ended, action(c)
+            if c.get("type") == "text" and (c.get("text") or "").strip():
+                return ended, gist(c["text"])
+    return bool(ended), None
+
+
+def launched_at(path):
+    """When the sub-agent started: its log's first entry."""
+    with open(path, "rb") as f:
+        when = json.loads(f.readline()).get("timestamp")
+    return datetime.datetime.fromisoformat(when.replace("Z", "+00:00")).timestamp()
+
+
+def read_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def cached(cache, key, path, read):
+    """read(path), read again only once the file has changed; None when it cannot be read."""
+    signature = stamp(path)
+    if key not in cache or cache[key][0] != signature:
+        try:
+            value = read(path)
+        except (OSError, ValueError, AttributeError, TypeError):
+            value = None
+        cache[key] = (signature, value)
+    return cache[key][1]
+
+
+def process_start(pid):
+    """When the process started, from ps's elapsed time ([[dd-]hh:]mm:ss), on Linux and macOS."""
+    out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True).stdout
+    days, _, clock = out.strip().rpartition("-")
+    seconds = 0
+    try:
+        for part in clock.split(":"):
+            seconds = seconds * 60 + int(part)
+        return time.time() - seconds - int(days or 0) * 86400
+    except ValueError:
+        return None  # gone
+
+
+def claude_started(pane, cache):
+    """When the pane's Claude Code process started, or None when herdr does not say."""
+    info = call("pane.process_info", {"pane_id": pane}).get("process_info") or {}
+    for p in info.get("foreground_processes") or []:
+        if "claude" in [p.get("name")] + [os.path.basename(arg) for arg in (p.get("argv") or [])[:2]]:
+            key = ("started", p["pid"])
+            if key not in cache:
+                cache[key] = process_start(p["pid"])
+            return cache[key]
+    return None
+
+
+def running_subagents(pane, path, cache):
+    """The sub-agents running in the Claude Code session whose transcript is path, the first
+    launched first: (task, doing). One without the finished mark whose log has not grown since
+    this Claude Code started was left by an earlier run of the session, which quit or crashed
+    with it running, so it runs no more."""
+    folder = os.path.join(path[:-len(".jsonl")], "subagents")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    found, started = [], None
+    for name in names:
+        if not (name.startswith("agent-") and name.endswith(".meta.json")):
+            continue
+        meta = cached(cache, ("meta", folder, name), os.path.join(folder, name), read_json)
+        log = os.path.join(folder, name[:-len(".meta.json")] + ".jsonl")
+        if not isinstance(meta, dict) or meta.get("finished") or not os.path.exists(log):
+            continue
+        if started is None:
+            started = claude_started(pane, cache) or 0
+        if os.path.getmtime(log) < started - 2:
+            continue
+        ended, doing = cached(cache, ("state", log), log, subagent_state) or (False, None)
+        if ended:
+            continue
+        task = one_line(meta.get("description") or meta.get("agentType") or "agent")
+        found.append((cached(cache, ("launched", log), log, launched_at) or 0, task, doing))
+    return [(task, doing) for at, task, doing in sorted(found, key=lambda f: f[0])]
+
+
+def subagent_tokens(running):
+    """$subagents, how many run (◐ 2), and a row for each: ├ its task · what it is doing."""
+    n = len(running)
+    shown = running if n <= SUBAGENT_ROWS else running[:SUBAGENT_ROWS - 1]
+    rows = ["%s · %s" % (task, doing) if doing else task for task, doing in shown]
+    if n > len(shown):
+        rows.append("%d more" % (n - len(shown)))
+    tokens = {"subagents": "◐ %d" % n if n else None}
+    for i in range(SUBAGENT_ROWS):
+        tokens["subagent_%d" % (i + 1)] = (
+            "%s %s" % ("└" if i == len(rows) - 1 else "├", rows[i][:200]) if i < len(rows) else None)
+    return tokens
+
+
+def subagents(agents, cache):
+    """Report each Claude Code pane's running sub-agents, every pass: they change while the
+    session's own transcript does not."""
+    for a in agents:
+        if a.get("agent") != "claude":
+            continue
+        path = session_log(a, cache)
+        tokens = subagent_tokens(running_subagents(a["pane_id"], path, cache) if path else [])
+        have = a.get("tokens") or {}
+        if any(have.get(k) != v for k, v in tokens.items()):
+            call("pane.report_metadata", {
+                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
+                "tokens": tokens})
+
+
 def place(a):
     """The folder the agent runs in, by name. herdr's workspace label is the folder the tab's
     workspace was opened in, which a tab started elsewhere does not change."""
@@ -524,6 +686,7 @@ def tick():
             places(agents)
             commands(agents, seen, cache)
             tabs(agents, named)
+            subagents(agents, cache)
         except (FileNotFoundError, ConnectionRefusedError):
             if time.time() - reached > GONE:
                 return  # the server is gone; the next hook starts a new ticker
