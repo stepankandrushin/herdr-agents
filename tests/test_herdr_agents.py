@@ -373,6 +373,69 @@ class Codex(Logs):
         self.assertEqual(herdr_agents.codex_message(path), "Committed on main.")
 
 
+class CodexDaemon(Logs):
+    """Codex's default mode: the shared app-server daemon (pid 2) holds the rollouts, the pane's
+    codex (pid 1) none."""
+    API = "019a0000-0000-7000-8000-000000000001"
+    DOCS = "019a0000-0000-7000-8000-000000000002"
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tmp.name, "app-server-daemon"))
+        with open(os.path.join(self.tmp.name, "app-server-daemon", "daemon.pid"), "w") as f:
+            json.dump({"pid": 2, "processStartTime": "Sat Jan  3 10:00:00 2026"}, f)
+        self.names = [{"id": self.API, "thread_name": "Fix login"},
+                      {"id": self.DOCS, "thread_name": "Write the docs"}]
+        self.held = {1: [], 2: [self.rollout(self.API), self.rollout(self.DOCS)]}
+        for name, value in (("CODEX", self.tmp.name),
+                            ("held_rollouts", lambda pid, cache: self.held.get(pid, [])),
+                            ("call", lambda method, params: {"process_info": {"foreground_processes": [
+                                {"pid": 1, "name": "codex", "cwd": "/src/api"}]}})):
+            patch = mock.patch.object(herdr_agents, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def rollout(self, thread):
+        return "/home/u/.codex/sessions/2026/01/03/rollout-2026-01-03T10-00-00-%s.jsonl" % thread
+
+    def found(self, title):
+        with open(os.path.join(self.tmp.name, "session_index.jsonl"), "w") as f:
+            for e in self.names:
+                f.write(json.dumps(e) + "\n")
+        pane = {"agent": "codex", "pane_id": "w1:p1", "terminal_title_stripped": title}
+        return herdr_agents.session_log(pane, {})
+
+    def test_the_session_its_title_names(self):
+        self.assertEqual(self.found("Fix login | api"), self.rollout(self.API))
+        self.assertEqual(self.found("Write the docs | api"), self.rollout(self.DOCS))
+
+    def test_renamed_and_long_names(self):
+        self.names.append({"id": self.API, "thread_name": "Fix the login flow on every page of the app, then tests"})
+        self.assertEqual(self.found("Fix the login flow on every page of the app, ... | api"),
+                         self.rollout(self.API))
+        self.assertIsNone(self.found("Fix login | api"))
+
+    def test_none_before_the_session_has_a_name(self):
+        self.names = []
+        self.assertIsNone(self.found("api"))
+        self.assertEqual(self.found(self.DOCS + " | api"), self.rollout(self.DOCS))  # the "thread" item
+
+    def test_two_sessions_of_one_name_the_one_at_work(self):
+        older, newer = (self.log({}, name="rollout-2026-01-03T10-00-00-%s.jsonl" % t) for t in (self.API, self.DOCS))
+        os.utime(older, (1, 1))
+        self.held[2] = [older, newer]
+        self.names = [{"id": self.API, "thread_name": "Fix login"}, {"id": self.DOCS, "thread_name": "Fix login"}]
+        self.assertEqual(self.found("Fix login | api"), newer)
+
+    def test_a_codex_holding_its_own_rollout_needs_no_daemon(self):
+        self.held[1] = ["/home/u/.codex/sessions/2026/01/03/rollout-2026-01-03T09-00-00-own.jsonl"]
+        self.assertEqual(self.found("Fix login | api"), self.held[1][0])
+
+    def test_no_daemon(self):
+        os.remove(os.path.join(self.tmp.name, "app-server-daemon", "daemon.pid"))
+        self.assertIsNone(self.found("Fix login | api"))
+
+
 class Pi(Logs):
     def test_last_command(self):
         path = self.log(

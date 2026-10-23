@@ -14,8 +14,8 @@
 #   workspace was opened in. And as $icon_place after the agent's emoji: 🦀 api.
 # - Reports each agent pane's last shell command and the last line of its output as $last_cmd
 #   and $last_out, for Claude Code, Codex and pi alike, read from the agent's own session log:
-#   Claude Code's transcript, the Codex rollout its process holds open, the pi session file
-#   herdr's pi integration names. A command still running shows "…", one that failed "✗".
+#   Claude Code's transcript, the Codex rollout its process or Codex's daemon holds open, the pi
+#   session file herdr's pi integration names. A command still running shows "…", one that failed "✗".
 # - Reports the start of each agent pane's last message to the user, on one line, from the
 #   same log, as $last_message: Done, tests pass and the fix is committed…
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
@@ -54,6 +54,7 @@ SOURCE = "herdr-agents"
 SOCK = os.environ.get("HERDR_SOCKET_PATH")
 PANE = os.environ.get("HERDR_PANE_ID")
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+CODEX = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
 STATE_DIR = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
 STATE = os.path.join(STATE_DIR, "herdr-claude-tabs.json")
 TICK = 2  # seconds between the ticker's passes
@@ -388,32 +389,74 @@ def command_tokens(found):
     return {"last_cmd": "$ " + cmd[:200], "last_out": (last or "✓")[:200]}
 
 
-def open_rollout(pane, cache):
-    """The Codex rollout file the pane's codex process is writing."""
-    info = call("pane.process_info", {"pane_id": pane}).get("process_info") or {}
+def held_rollouts(pid, cache):
+    """The Codex rollout files the process holds open."""
+    fds, now = "/proc/%d/fd" % pid, time.time()
+    last = cache.get(("lsof", pid))
+    if os.path.isdir(fds):
+        targets = []
+        for fd in os.listdir(fds):
+            try:
+                targets.append(os.readlink(os.path.join(fds, fd)))
+            except OSError:
+                pass
+    elif last and now - last[1] < 30:
+        targets = last[0]  # lsof costs a Mac a tenth of a second: once in 30 s
+    else:  # macOS
+        out = subprocess.run(["lsof", "-Fn", "-p", str(pid)], capture_output=True, text=True).stdout
+        targets = [line[1:] for line in out.splitlines() if line.startswith("n")]
+        cache[("lsof", pid)] = (targets, now)
+    return [t for t in targets if "/sessions/" in t and os.path.basename(t).startswith("rollout-")
+            and t.endswith(".jsonl")]
+
+
+def thread_names(path):
+    """Codex's session names by thread id, from session_index.jsonl, which gets a line at each
+    naming: the last one stands."""
+    names = {}
+    with open(path) as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+                names[e["id"]] = e["thread_name"].strip()
+            except (ValueError, KeyError, TypeError, AttributeError):
+                pass
+    return names
+
+
+def daemon_rollout(a, cache):
+    """Codex's default mode runs every session in one app-server daemon that all codex processes
+    share, so the daemon holds all their rollouts, and those of sessions whose codex has quit and
+    which it has not shut down yet. The pane's own is the one its terminal title names: Codex's
+    title holds the session's name, cut to 48 characters, and nothing until the session has one
+    (or its thread id, for the "thread" item)."""
+    daemon = cached(cache, "codex daemon", os.path.join(CODEX, "app-server-daemon", "daemon.pid"), read_json)
+    if not isinstance(daemon, dict) or not isinstance(daemon.get("pid"), int):
+        return None
+    names = cached(cache, "codex names", os.path.join(CODEX, "session_index.jsonl"), thread_names) or {}
+    title = " | %s | " % (codex_title(a) or "")
+    mine = []
+    for t in held_rollouts(daemon["pid"], cache):
+        thread = re.sub(r"^rollout-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-|\.jsonl$", "", os.path.basename(t))
+        name = names.get(thread) or thread
+        if " | %s | " % (name if len(name) <= 48 else name[:45] + "...") in title:
+            mine.append(t)
+    # One name can be two sessions' (a new one started with the same words): the one at work.
+    return max(mine, key=lambda t: os.path.getmtime(t) if os.path.exists(t) else 0) if mine else None
+
+
+def open_rollout(a, cache):
+    """The Codex rollout file the pane's session is writing: the one its codex process holds open,
+    or in Codex's default mode, where the app-server daemon writes it, the daemon's one for the
+    pane."""
+    info = call("pane.process_info", {"pane_id": a["pane_id"]}).get("process_info") or {}
     for p in info.get("foreground_processes") or []:
         if p.get("name") != "codex":
             continue
-        pid, now = p["pid"], time.time()
-        fds = "/proc/%d/fd" % pid
-        last = cache.get(pane)
-        if not os.path.isdir(fds) and last and last[0] == pid and now - last[2] < 30:
-            return last[1]  # lsof costs a Mac a tenth of a second: once in 30 s
-        if os.path.isdir(fds):
-            targets = []
-            for fd in os.listdir(fds):
-                try:
-                    targets.append(os.readlink(os.path.join(fds, fd)))
-                except OSError:
-                    pass
-        else:  # macOS
-            out = subprocess.run(["lsof", "-Fn", "-p", str(pid)], capture_output=True, text=True).stdout
-            targets = [line[1:] for line in out.splitlines() if line.startswith("n")]
-        found = [t for t in targets if "/sessions/" in t and os.path.basename(t).startswith("rollout-")
-                 and t.endswith(".jsonl")]
-        path = max(found, key=lambda t: os.path.getmtime(t) if os.path.exists(t) else 0) if found else None
-        cache[pane] = (pid, path, now)
-        return path
+        found = held_rollouts(p["pid"], cache)
+        if not found:
+            return daemon_rollout(a, cache)
+        return max(found, key=lambda t: os.path.getmtime(t) if os.path.exists(t) else 0)
     return None
 
 
@@ -427,7 +470,7 @@ def session_log(a, cache):
     if a.get("agent") == "pi":
         return sess.get("value") if sess.get("kind") == "path" else None
     if a.get("agent") == "codex":
-        return open_rollout(a["pane_id"], cache)
+        return open_rollout(a, cache)
     return None
 
 

@@ -152,7 +152,12 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   Claude Code's transcript (`~/.claude/projects/*/<session>.jsonl`, by the session id herdr's
   integration reports), the Codex rollout file the `codex` process holds open (found in
   `/proc/<pid>/fd`, or with `lsof` on macOS, there at most once in 30 seconds), and the pi
-  session file herdr's pi integration reports. It reads the last megabyte of a log only, about
+  session file herdr's pi integration reports. In Codex's default mode the `codex` process
+  holds none: its app-server daemon, which every `codex` started without `--no-daemon` shares,
+  writes them all (`~/.codex/app-server-daemon/daemon.pid` names it). The pane's own is then the
+  one whose session name, from `~/.codex/session_index.jsonl`, the pane's terminal title shows,
+  so a session shows its log from when Codex names it, a few seconds into its first turn; a
+  terminal title set with `/title` to leave the name out shows none. It reads the last megabyte of a log only, about
   a millisecond even for a log of tens of megabytes.
 - For a Claude Code session's sub-agents it reads the folder beside the transcript,
   `<session>/subagents/`: each sub-agent's `agent-<id>.meta.json` (its task, and the `finished`
