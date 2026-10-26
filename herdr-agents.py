@@ -82,20 +82,25 @@ def call(method, params):
     return json.loads(buf or b"{}").get("result") or {}
 
 
-def entries(path, size=1 << 20):
-    """The log's entries, newest first, from its last megabyte."""
+def entries(path, size=1 << 20, most=1 << 25):
+    """The log's entries, newest first: its last megabyte, then the one before it as the reader
+    asks for more, so a log whose end is a few camera frames still has its last reply, up to 32
+    megabytes back."""
     with open(path, "rb") as f:
         f.seek(0, 2)
-        end = f.tell()
-        f.seek(max(0, end - size))
-        lines = f.read().split(b"\n")
-    if end > size:
-        lines = lines[1:]  # cut in the middle
-    for line in reversed(lines):
-        try:
-            yield json.loads(line)
-        except ValueError:
-            pass
+        start = end = f.tell()
+        cut = b""  # the end of a line that starts in the block before
+        while start > 0 and end - start < most:
+            step = min(size, start)
+            start -= step
+            f.seek(start)
+            lines = (f.read(step) + cut).split(b"\n")
+            cut = lines.pop(0) if start else b""
+            for line in reversed(lines):
+                try:
+                    yield json.loads(line)
+                except ValueError:
+                    pass
 
 
 def last_message_at(path, agent="claude"):

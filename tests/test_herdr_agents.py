@@ -168,6 +168,27 @@ class Claude(Logs):
         path = self.log({"type": "user", "timestamp": "2026-01-02T03:04:05.000Z"}, {"type": "summary"})
         self.assertEqual(herdr_agents.last_message_at(path), 1767323045)
 
+    def test_log_ending_in_a_large_image(self):
+        frame = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "r", "content": [
+            {"type": "image", "source": {"type": "base64", "data": "A" * (3 << 19)}}]}]}}
+        path = self.log(say("Looking at the board."), bash_call("a", "ls"), bash_result("a", "x"),
+                        usage(input_tokens=5, output_tokens=7), frame, {"type": "ai-title"})
+        self.assertEqual(herdr_agents.claude_context(path), 12)
+        self.assertEqual(herdr_agents.claude_message(path), "ok")
+        self.assertEqual(herdr_agents.claude_command(path)[0], "ls")
+
+
+class Entries(Logs):
+    def test_blocks_cut_lines(self):
+        events = [{"n": i, "pad": "x" * (i * 7)} for i in range(12)]
+        path = self.log(*events)
+        for size in (5, 16, 1 << 20):  # a line longer than a block, lines cut, the whole log
+            self.assertEqual([e["n"] for e in herdr_agents.entries(path, size)], list(range(11, -1, -1)))
+
+    def test_read_no_further_than_most(self):
+        path = self.log({"n": 0}, {"n": 1, "pad": "x" * 100}, {"n": 2})
+        self.assertEqual([e["n"] for e in herdr_agents.entries(path, 16, 64)], [2])
+
 
 def tool(name, **args):
     return {"type": "assistant", "message": {"content": [

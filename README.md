@@ -167,8 +167,10 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   writes them all (`~/.codex/app-server-daemon/daemon.pid` names it). The pane's own is then the
   one whose session name, from `~/.codex/session_index.jsonl`, the pane's terminal title shows,
   so a session shows its log from when Codex names it, a few seconds into its first turn; a
-  terminal title set with `/title` to leave the name out shows none. It reads the last megabyte of a log only, about
-  a millisecond even for a log of tens of megabytes.
+  terminal title set with `/title` to leave the name out shows none. It reads a log from its end, a
+  megabyte at a time, only as far back as the entry it looks for, at most 32 megabytes, so a log
+  whose end is a few large images still shows its last reply: a few milliseconds, under a tenth of a
+  second for the whole 32.
 - For a Claude Code session's sub-agents it reads the folder beside the transcript,
   `<session>/subagents/`: each sub-agent's `agent-<id>.meta.json` (its task, and the `finished`
   mark Claude Code sets when it ends) and its own log `agent-<id>.jsonl`, the end of it, for what
