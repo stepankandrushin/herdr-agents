@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -530,6 +531,103 @@ class PiSession(Logs):
         with mock.patch.object(herdr_agents, "report", lambda pane, at, now, agent: reported.append((pane, at, agent))):
             herdr_agents.refresh([self.pane], 1767323045 + 7 * 60, cache={})
         self.assertEqual(reported, [("w1:p1", 1767323045, "pi")])
+
+
+class ClaudeSession(Logs):
+    """A Claude Code herdr's integration does not report (its own CLAUDE_CONFIG_DIR, or a
+    sandbox): its transcript is the newest one in the project folder its working directory names
+    under its config folder, written since it started."""
+    STARTED = 1767600000
+
+    def setUp(self):
+        super().setUp()
+        self.home = os.path.join(self.tmp.name, "profile")
+        self.folder = os.path.join(self.home, "projects", "-src-my-api")
+        os.makedirs(self.folder)
+        self.env = {"CLAUDE_CONFIG_DIR": self.home}
+        self.process = {"pid": 7, "name": "claude", "cwd": "/src/my_api"}
+        for name, value in (("CLAUDE", os.path.join(self.tmp.name, "default")),
+                            ("process_start", lambda pid: self.STARTED),
+                            ("process_env", lambda pid: self.env),
+                            ("call", lambda method, params: {"process_info": {"foreground_processes": [
+                                {"pid": 6, "name": "unshare", "argv": ["unshare", "--user"]}, self.process]}})):
+            patch = mock.patch.object(herdr_agents, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.pane = {"agent": "claude", "pane_id": "w1:p1", "cwd": "/src/my_api"}
+
+    def session(self, name, written, folder=None):
+        path = os.path.join(folder or self.folder, name + ".jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(json.dumps({"type": "user", "timestamp": "2026-01-02T03:04:05.000Z"}) + "\n")
+        os.utime(path, (written, written))
+        return path
+
+    def test_newest_written_since_claude_started(self):
+        self.session("before", self.STARTED - 60)
+        current = self.session("current", self.STARTED + 30)
+        self.session("older", self.STARTED + 10)
+        os.makedirs(os.path.join(self.folder, "current", "subagents"))
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), current)
+
+    def test_none_before_it_writes_one(self):
+        self.session("before", self.STARTED - 60)
+        self.assertIsNone(herdr_agents.session_log(self.pane, {}, [self.pane]))
+
+    def test_not_one_another_pane_reports(self):
+        mine = self.session("mine", self.STARTED + 10)
+        self.session("theirs", self.STARTED + 30)
+        other = {"agent": "claude", "pane_id": "w1:p2", "agent_session": {"kind": "id", "value": "theirs"}}
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane, other]), mine)
+
+    def test_default_config_folder(self):
+        self.env = {}
+        default = os.path.join(self.tmp.name, "home", ".claude", "projects", "-src-my-api")
+        path = self.session("current", self.STARTED + 30, default)
+        with mock.patch.dict(os.environ, {"HOME": os.path.join(self.tmp.name, "home")}):
+            self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), path)
+
+    def test_own_config_folder_where_the_process_environment_cannot_be_read(self):
+        self.env = None
+        path = self.session("current", self.STARTED + 30, os.path.join(herdr_agents.CLAUDE, "projects", "-src-my-api"))
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), path)
+
+    def test_long_folder_name_ends_in_a_hash(self):
+        self.process["cwd"] = "/src/" + "a" * 220
+        path = self.session("current", self.STARTED + 30, os.path.join(
+            self.home, "projects", "-src-" + "a" * 195 + "-1x2y3z"))
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), path)
+
+    def test_no_claude_process(self):
+        self.session("current", self.STARTED + 30)
+        self.process["name"] = "bash"
+        self.assertIsNone(herdr_agents.session_log(self.pane, {}, [self.pane]))
+
+    def test_age_from_the_found_transcript(self):
+        self.session("current", self.STARTED + 30)
+        self.pane["tokens"] = {"last_active": "2h", "last_active_at": "1767316000"}  # a pane's earlier agent
+        reported = []
+        with mock.patch.object(herdr_agents, "report", lambda pane, at, now, agent: reported.append((pane, at, agent))):
+            herdr_agents.refresh([self.pane], 1767323045 + 7 * 60, cache={})
+        self.assertEqual(reported, [("w1:p1", 1767323045, "claude")])
+
+
+class ProcessEnv(unittest.TestCase):
+    @unittest.skipUnless(os.path.exists("/proc/self/environ"), "Linux")
+    def test_environment_it_started_with(self):
+        child = subprocess.Popen(["sh", "-c", "echo; exec sleep 5"], stdout=subprocess.PIPE,
+                                 env={"CLAUDE_CONFIG_DIR": "/p/a=b", "PATH": os.environ["PATH"]})
+        try:
+            child.stdout.readline()  # started
+            self.assertEqual(herdr_agents.process_env(child.pid)["CLAUDE_CONFIG_DIR"], "/p/a=b")
+        finally:
+            child.kill()
+            child.wait()
+            child.stdout.close()
+
+    def test_gone(self):
+        self.assertIsNone(herdr_agents.process_env(2 ** 22 + 1))
 
 
 class Hook(unittest.TestCase):

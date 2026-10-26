@@ -41,8 +41,9 @@ Two files do it:
 
 - herdr, with its Claude Code integration (`herdr integration install claude`), and its pi
   integration for pi panes (`herdr integration install pi`). Codex needs none: its log is found
-  from its process. A pi without the integration (run with `--no-extensions`, or sandboxed away
-  from herdr's socket) is found by its folder. Used with herdr 0.9.3 to 0.9.5.
+  from its process. A Claude Code or pi without the integration (a Claude Code with its own
+  `CLAUDE_CONFIG_DIR`, a pi run with `--no-extensions`, or either sandboxed away from herdr's
+  socket) is found by its folder. Used with herdr 0.9.3 to 0.9.5.
 - Python 3.9 or newer (the system Python of macOS is enough).
 - Linux or macOS.
 
@@ -151,7 +152,11 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   two seconds it asks herdr for its agent panes, rereads only the session logs that have grown,
   moves the ages on, and reports the tokens that changed. It reads each agent's own log:
   Claude Code's transcript (`~/.claude/projects/*/<session>.jsonl`, by the session id herdr's
-  integration reports), the Codex rollout file the `codex` process holds open (found in
+  integration reports; for a Claude Code the integration does not report, the newest
+  `projects/<folder>/*.jsonl` under its config folder, the `CLAUDE_CONFIG_DIR` the process was
+  started with, read from `/proc` on Linux, or `~/.claude`, written since the pane's `claude`
+  started and not reported by another pane; `<folder>` is the directory it runs in with every
+  character but a letter or digit as `-`), the Codex rollout file the `codex` process holds open (found in
   `/proc/<pid>/fd`, or with `lsof` on macOS, there at most once in 30 seconds), and the pi
   session file herdr's pi integration reports. pi keeps no file open, so for a pi that the
   integration does not report it takes the newest file in `~/.pi/agent/sessions/--<folder>--/`

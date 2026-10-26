@@ -14,9 +14,10 @@
 #   workspace was opened in. And as $icon_place after the agent's emoji: 🦀 api.
 # - Reports each agent pane's last shell command and the last line of its output as $last_cmd
 #   and $last_out, for Claude Code, Codex and pi alike, read from the agent's own session log:
-#   Claude Code's transcript, the Codex rollout its process or Codex's daemon holds open, the pi
-#   session file herdr's pi integration names, or else the newest in pi's folder for the pane's
-#   working directory. A command still running shows "…", one that failed "✗".
+#   the Claude Code transcript herdr's Claude integration names, the Codex rollout its process or
+#   Codex's daemon holds open, the pi session file herdr's pi integration names, or else the
+#   newest in Claude Code's or pi's folder for the pane's working directory. A command still
+#   running shows "…", one that failed "✗".
 # - Reports the start of each agent pane's last message to the user, on one line, from the
 #   same log, as $last_message: Done, tests pass and the fix is committed…
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
@@ -145,8 +146,9 @@ def report(pane, at, now, agent="claude"):
 
 
 def refresh(agents, now, skip=None, cache=None):
-    """Keep Claude, Codex and pi ages current. Codex and pi have no hook, so their own logs supply
-    the time, even when the pane still carries tokens from a previous session."""
+    """Keep Claude, Codex and pi ages current. Codex and pi have no hook, nor a Claude Code that
+    herdr's integration does not report (its config folder has neither hook), so their own logs
+    supply the time, even when the pane still carries tokens from a previous session."""
     if cache is None:
         cache = {}
     for a in agents:
@@ -154,7 +156,8 @@ def refresh(agents, now, skip=None, cache=None):
         if agent not in ("claude", "codex", "pi") or a is skip:
             continue
         tokens = a.get("tokens") or {}
-        if agent in ("codex", "pi"):
+        from_log = agent != "claude" or not a.get("agent_session")
+        if from_log:
             path = session_log(a, cache, agents)
             key = ("activity", a["pane_id"])
             signature = stamp(path)
@@ -173,7 +176,7 @@ def refresh(agents, now, skip=None, cache=None):
                 at = found and last_message_at(found)
         if a.get("agent_status") == "working" and now - (at or 0) >= 60:
             at = now
-        if not at and agent == "claude":
+        if not at and not from_log:
             continue
         age = label(at, now) if at else None
         epoch = "%d" % at if at else None
@@ -475,31 +478,71 @@ def pi_session(a, agents, cache):
     for p in info.get("foreground_processes") or []:
         if p.get("name") != "pi" or not p.get("cwd"):
             continue
-        key = ("started", p["pid"])
-        if key not in cache:
-            cache[key] = process_start(p["pid"])
-        if not cache[key]:
-            return None
         folder = "--%s--" % re.sub(r"[/\\:]", "-", re.sub(r"^[/\\]", "", p["cwd"]))
-        others = {(b.get("agent_session") or {}).get("value") for b in agents if b is not a}
-        newest, path = cache[key] - 2, None  # ps counts whole seconds
+        return newest_log([os.path.join(PI, "sessions", folder)], started(p, cache), a, agents)
+    return None
+
+
+def claude_session(a, agents, cache):
+    """The transcript of a Claude Code whose session herdr's Claude integration does not report:
+    one with a CLAUDE_CONFIG_DIR whose settings lack the integration's hook, or sandboxed away from
+    herdr's socket. Claude Code writes it to projects/<working directory, every character but a
+    letter or digit as -> under its config folder, the process's CLAUDE_CONFIG_DIR (read from /proc
+    on Linux) or ~/.claude: the newest one there written since the pane's claude started, but not
+    one another pane's integration reports."""
+    p = claude_process(a["pane_id"])
+    cwd = p and (p.get("cwd") or a.get("cwd"))
+    if not cwd:
+        return None
+    key = ("env", p["pid"])
+    if key not in cache:
+        cache[key] = process_env(p["pid"])
+    env = cache[key]
+    home = CLAUDE if env is None else env.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    folder = re.sub(r"[^A-Za-z0-9]", "-", cwd)
+    if len(folder) > 200:
+        folder = folder[:200] + "-*"  # and a hash of the whole
+    return newest_log(glob.glob(os.path.join(home, "projects", folder)), started(p, cache), a, agents)
+
+
+def newest_log(folders, since, a, agents):
+    """The newest *.jsonl in folders written since the agent's process started, but not one
+    another pane's integration reports, by path (pi) or session id (Claude Code). Two such agents
+    in one folder both take the newer one."""
+    if not since:
+        return None
+    others = {(b.get("agent_session") or {}).get("value") for b in agents if b is not a}
+    newest, path = since - 2, None  # ps counts whole seconds
+    for folder in folders:
         try:
-            for f in os.scandir(os.path.join(PI, "sessions", folder)):
-                if f.name.endswith(".jsonl") and f.path not in others and f.stat().st_mtime >= newest:
+            for f in os.scandir(folder):
+                if (f.name.endswith(".jsonl") and f.path not in others
+                        and f.name[:-len(".jsonl")] not in others and f.stat().st_mtime >= newest):
                     newest, path = f.stat().st_mtime, f.path
         except OSError:
             pass
-        return path
-    return None
+    return path
+
+
+def process_env(pid):
+    """The environment the process started with, or None where it cannot be read (macOS)."""
+    try:
+        with open("/proc/%d/environ" % pid, "rb") as f:
+            raw = f.read().decode(errors="replace")
+    except OSError:
+        return None
+    return dict(v.split("=", 1) for v in raw.split("\0") if "=" in v)
 
 
 def session_log(a, cache, agents=()):
     sess = a.get("agent_session") or {}
     if a.get("agent") == "claude":
         sid = sess.get("value")
-        if sid and not cache.get(sid):
+        if not sid:
+            return claude_session(a, agents, cache)
+        if not cache.get(sid):
             cache[sid] = transcript(sid)
-        return sid and cache.get(sid)
+        return cache.get(sid)
     if a.get("agent") == "pi":
         return sess.get("value") if sess.get("kind") == "path" else pi_session(a, agents, cache)
     if a.get("agent") == "codex":
@@ -632,16 +675,27 @@ def process_start(pid):
         return None  # gone
 
 
-def claude_started(pane, cache):
-    """When the pane's Claude Code process started, or None when herdr does not say."""
+def started(p, cache):
+    """When the process herdr lists started, asked once."""
+    key = ("started", p["pid"])
+    if key not in cache:
+        cache[key] = process_start(p["pid"])
+    return cache[key]
+
+
+def claude_process(pane):
+    """The pane's Claude Code process, as herdr lists it, or None."""
     info = call("pane.process_info", {"pane_id": pane}).get("process_info") or {}
     for p in info.get("foreground_processes") or []:
         if "claude" in [p.get("name")] + [os.path.basename(arg) for arg in (p.get("argv") or [])[:2]]:
-            key = ("started", p["pid"])
-            if key not in cache:
-                cache[key] = process_start(p["pid"])
-            return cache[key]
+            return p
     return None
+
+
+def claude_started(pane, cache):
+    """When the pane's Claude Code process started, or None when herdr does not say."""
+    p = claude_process(pane)
+    return started(p, cache) if p else None
 
 
 def running_subagents(pane, path, cache):
@@ -694,7 +748,7 @@ def subagents(agents, cache):
     for a in agents:
         if a.get("agent") != "claude":
             continue
-        path = session_log(a, cache)
+        path = session_log(a, cache, agents)
         tokens = subagent_tokens(running_subagents(a["pane_id"], path, cache) if path else [])
         have = a.get("tokens") or {}
         if any(have.get(k) != v for k, v in tokens.items()):
