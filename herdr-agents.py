@@ -5,8 +5,8 @@
 # A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does seven things in
 # the herdr server the pane belongs to:
 #
-# - Reports how long ago each Claude Code or Codex session last did something as the pane token
-#   $last_active, which herdr's sidebar rows can show (config.toml): now, 7m, 5h, 3d,
+# - Reports how long ago each Claude Code, Codex or pi session last did something as the pane
+#   token $last_active, which herdr's sidebar rows can show (config.toml): now, 7m, 5h, 3d,
 #   and "now" for as long as herdr sees it at work. The time itself is kept in $last_active_at.
 #   A pane with no time yet takes it from its transcript's last message.
 # - Reports the folder each agent pane runs in as $place, for Claude Code, Codex and pi: the
@@ -15,7 +15,8 @@
 # - Reports each agent pane's last shell command and the last line of its output as $last_cmd
 #   and $last_out, for Claude Code, Codex and pi alike, read from the agent's own session log:
 #   Claude Code's transcript, the Codex rollout its process or Codex's daemon holds open, the pi
-#   session file herdr's pi integration names. A command still running shows "…", one that failed "✗".
+#   session file herdr's pi integration names, or else the newest in pi's folder for the pane's
+#   working directory. A command still running shows "…", one that failed "✗".
 # - Reports the start of each agent pane's last message to the user, on one line, from the
 #   same log, as $last_message: Done, tests pass and the fix is committed…
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
@@ -55,6 +56,7 @@ SOCK = os.environ.get("HERDR_SOCKET_PATH")
 PANE = os.environ.get("HERDR_PANE_ID")
 CLAUDE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 CODEX = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+PI = os.environ.get("PI_CODING_AGENT_DIR") or os.path.expanduser("~/.pi/agent")
 STATE_DIR = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
 STATE = os.path.join(STATE_DIR, "herdr-claude-tabs.json")
 TICK = 2  # seconds between the ticker's passes
@@ -107,6 +109,9 @@ def last_message_at(path, agent="claude"):
                 or e.get("type") == "response_item" and p.get("type") in (
                     "message", "function_call", "function_call_output",
                     "custom_tool_call", "custom_tool_call_output"))
+        elif agent == "pi":
+            relevant = e.get("type") == "message" and (e.get("message") or {}).get("role") in (
+                "user", "assistant", "toolResult", "bashExecution")
         if relevant and e.get("timestamp"):
             try:
                 stamp = e["timestamp"].replace("Z", "+00:00")  # fromisoformat before 3.11
@@ -140,17 +145,17 @@ def report(pane, at, now, agent="claude"):
 
 
 def refresh(agents, now, skip=None, cache=None):
-    """Keep Claude and Codex ages current. Codex has no hook, so its own log supplies the time,
-    even when the pane still carries tokens from a previous session."""
+    """Keep Claude, Codex and pi ages current. Codex and pi have no hook, so their own logs supply
+    the time, even when the pane still carries tokens from a previous session."""
     if cache is None:
         cache = {}
     for a in agents:
         agent = a.get("agent")
-        if agent not in ("claude", "codex") or a is skip:
+        if agent not in ("claude", "codex", "pi") or a is skip:
             continue
         tokens = a.get("tokens") or {}
-        if agent == "codex":
-            path = session_log(a, cache)
+        if agent in ("codex", "pi"):
+            path = session_log(a, cache, agents)
             key = ("activity", a["pane_id"])
             signature = stamp(path)
             if key not in cache or cache[key][0] != signature:
@@ -460,7 +465,35 @@ def open_rollout(a, cache):
     return None
 
 
-def session_log(a, cache):
+def pi_session(a, agents, cache):
+    """The session file of a pi whose session herdr's pi integration does not report: one run
+    with --no-extensions, or sandboxed away from herdr's socket. pi holds no file open, and writes
+    a session to the folder its working directory names under ~/.pi/agent/sessions: the newest
+    one there written since the pane's pi started, but not one another pane's integration reports.
+    Two such pis in one folder both take the newer one."""
+    info = call("pane.process_info", {"pane_id": a["pane_id"]}).get("process_info") or {}
+    for p in info.get("foreground_processes") or []:
+        if p.get("name") != "pi" or not p.get("cwd"):
+            continue
+        key = ("started", p["pid"])
+        if key not in cache:
+            cache[key] = process_start(p["pid"])
+        if not cache[key]:
+            return None
+        folder = "--%s--" % re.sub(r"[/\\:]", "-", re.sub(r"^[/\\]", "", p["cwd"]))
+        others = {(b.get("agent_session") or {}).get("value") for b in agents if b is not a}
+        newest, path = cache[key] - 2, None  # ps counts whole seconds
+        try:
+            for f in os.scandir(os.path.join(PI, "sessions", folder)):
+                if f.name.endswith(".jsonl") and f.path not in others and f.stat().st_mtime >= newest:
+                    newest, path = f.stat().st_mtime, f.path
+        except OSError:
+            pass
+        return path
+    return None
+
+
+def session_log(a, cache, agents=()):
     sess = a.get("agent_session") or {}
     if a.get("agent") == "claude":
         sid = sess.get("value")
@@ -468,7 +501,7 @@ def session_log(a, cache):
             cache[sid] = transcript(sid)
         return sid and cache.get(sid)
     if a.get("agent") == "pi":
-        return sess.get("value") if sess.get("kind") == "path" else None
+        return sess.get("value") if sess.get("kind") == "path" else pi_session(a, agents, cache)
     if a.get("agent") == "codex":
         return open_rollout(a, cache)
     return None
@@ -489,7 +522,7 @@ def commands(agents, seen, cache):
         read = READERS.get(a.get("agent"))
         if not read:
             continue
-        path = session_log(a, cache)
+        path = session_log(a, cache, agents)
         last = seen.get(a["pane_id"])
         if last and last[0] == stamp(path) and stamp(last[1]) == last[2]:
             continue
@@ -832,18 +865,34 @@ def release_tabs(agents):
             del given[key]  # renamed by hand since, or closed: no longer this one's
 
 
+def hand_named(a, agents):
+    """The label of the agent's tab when it was named by hand, by the user or by the script that
+    opened it, and the agent is alone in it. None while it is herdr's number or this one's name."""
+    if not a.get("tab_id") or not alone(a, agents):
+        return None
+    label = ((call("tab.get", {"tab_id": a["tab_id"]}).get("tab") or {}).get("label") or "").strip()
+    with given_names() as given:
+        ours = given.get("%s %s" % (SOCK, a["tab_id"]))
+    return label if label and not label.isdigit() and label != ours else None
+
+
 def tabs(agents, named):
     """Keep each Claude, Codex or pi tab named as its title. Look again when its title, its
-    tab or the agents beside it change."""
+    tab or the agents beside it change. Codex's and pi's titles are their $session_title, but a
+    pi session with no name yet, whose title is its folder alone, shows its tab's name if given by
+    hand: the folder is on the sidebar's first row already."""
     supported = [a for a in agents if a.get("agent") in TITLES]
     for pane in set(named) - {a["pane_id"] for a in supported}:
         del named[pane]  # gone: a new agent there, even with the same session, renames
     for a in supported:
-        name = TITLES[a["agent"]](a)
-        if a["agent"] in ("codex", "pi") and (a.get("tokens") or {}).get("session_title") != name:
+        name = shown = TITLES[a["agent"]](a)
+        folder = os.path.basename((a.get("foreground_cwd") or a.get("cwd") or "").rstrip("/"))
+        if a["agent"] == "pi" and name and name == folder:
+            shown = hand_named(a, agents) or name
+        if a["agent"] in ("codex", "pi") and (a.get("tokens") or {}).get("session_title") != shown:
             call("pane.report_metadata", {
                 "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": {"session_title": name}})
+                "tokens": {"session_title": shown}})
         seen = (a.get("tab_id"), name, alone(a, agents))
         if name and named.get(a["pane_id"]) != seen:
             name_tab(a, agents, name)

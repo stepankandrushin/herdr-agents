@@ -460,6 +460,77 @@ class Pi(Logs):
                                      "errorMessage": "Operation aborted"}})
         self.assertEqual(herdr_agents.pi_message(path), "Operation aborted")
 
+    def test_activity_from_messages_and_tool_results(self):
+        path = self.log(
+            {"type": "message", "timestamp": "2026-01-02T03:00:00.000Z", "message": {"role": "assistant"}},
+            {"type": "message", "timestamp": "2026-01-02T03:04:05.000Z", "message": {"role": "toolResult"}},
+            {"type": "model_change", "timestamp": "2026-01-02T05:00:00.000Z"})
+        self.assertEqual(herdr_agents.last_message_at(path, "pi"), 1767323045)
+
+
+class PiSession(Logs):
+    """A pi without herdr's pi integration (--no-extensions, or a sandbox): its session file is
+    the newest one in the folder pi keeps for its working directory, written since it started."""
+    STARTED = 1767600000
+
+    def setUp(self):
+        super().setUp()
+        self.folder = os.path.join(self.tmp.name, "sessions", "--src-api--")
+        os.makedirs(self.folder)
+        self.process = {"pid": 7, "name": "pi", "cwd": "/src/api"}
+        for name, value in (("PI", self.tmp.name),
+                            ("process_start", lambda pid: self.STARTED),
+                            ("call", lambda method, params: {"process_info": {"foreground_processes": [
+                                {"pid": 6, "name": "bash", "cwd": "/src/api"}, self.process]}})):
+            patch = mock.patch.object(herdr_agents, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.pane = {"agent": "pi", "pane_id": "w1:p1", "cwd": "/src/api"}
+
+    def session(self, name, written):
+        path = os.path.join(self.folder, name + ".jsonl")
+        with open(path, "w") as f:
+            f.write(json.dumps({"type": "session", "cwd": "/src/api"}) + "\n")
+        os.utime(path, (written, written))
+        return path
+
+    def test_newest_written_since_pi_started(self):
+        self.session("before", self.STARTED - 60)
+        resumed = self.session("resumed", self.STARTED + 30)
+        self.session("older", self.STARTED + 10)
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), resumed)
+
+    def test_none_before_it_writes_one(self):
+        self.session("before", self.STARTED - 60)
+        self.assertIsNone(herdr_agents.session_log(self.pane, {}, [self.pane]))
+
+    def test_not_one_another_pane_reports(self):
+        mine = self.session("mine", self.STARTED + 10)
+        theirs = self.session("theirs", self.STARTED + 30)
+        other = {"agent": "pi", "pane_id": "w1:p2", "agent_session": {"kind": "path", "value": theirs}}
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane, other]), mine)
+
+    def test_reported_session_wins(self):
+        self.session("newest", self.STARTED + 30)
+        self.pane["agent_session"] = {"kind": "path", "value": "/home/u/.pi/agent/sessions/x.jsonl"}
+        self.assertEqual(herdr_agents.session_log(self.pane, {}, [self.pane]), "/home/u/.pi/agent/sessions/x.jsonl")
+
+    def test_no_pi_process(self):
+        self.session("newest", self.STARTED + 30)
+        self.process["name"] = "bash"
+        self.assertIsNone(herdr_agents.session_log(self.pane, {}, [self.pane]))
+
+    def test_age_from_the_found_session(self):
+        path = self.session("current", self.STARTED + 30)
+        with open(path, "a") as f:
+            f.write(json.dumps({"type": "message", "timestamp": "2026-01-02T03:04:05.000Z",
+                                "message": {"role": "assistant"}}) + "\n")
+        os.utime(path, (self.STARTED + 30, self.STARTED + 30))
+        reported = []
+        with mock.patch.object(herdr_agents, "report", lambda pane, at, now, agent: reported.append((pane, at, agent))):
+            herdr_agents.refresh([self.pane], 1767323045 + 7 * 60, cache={})
+        self.assertEqual(reported, [("w1:p1", 1767323045, "pi")])
+
 
 class Hook(unittest.TestCase):
     def test_silent_outside_herdr(self):
@@ -576,6 +647,21 @@ class Tabs(Logs):
         self.assertEqual(self.tab["label"], "🥧 Fix docs - api")
         herdr_agents.tabs([], named)
         self.assertEqual(self.tab["label"], "1")
+
+    def test_pi_without_a_session_name_shows_a_tab_name_given_by_hand(self):
+        named = {}
+        pi = self.pane
+        pi.update(agent="pi", cwd="/src/api", terminal_title="π - api", terminal_title_stripped="π - api")
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(pi["tokens"]["session_title"], "api")  # its own tab name is not one
+        self.tab["label"] = "Login experiment"
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(pi["tokens"]["session_title"], "Login experiment")
+        self.assertEqual(self.tab["label"], "Login experiment")
+        pi.update(terminal_title="π - Fix docs - api", terminal_title_stripped="π - Fix docs - api")
+        herdr_agents.tabs([pi], named)
+        self.assertEqual(pi["tokens"]["session_title"], "Fix docs - api")
+        self.assertEqual(self.tab["label"], "Login experiment")
 
     def test_name_given_before_the_emoji_takes_it(self):
         with herdr_agents.given_names() as given:

@@ -21,9 +21,10 @@ window_title = "{hostname}: {workspace} · {tab}"
 # ($last_active: now, 7m, 5h, 3d) and the context its session holds ($context: 53k); then the
 # session's name, which the agent writes into its terminal title; then the start of its last
 # message to you ($last_message), on one line: what it is doing, or what it did. Codex's
-# $session_title also removes its temporary "Action Required" prefix, pi's its "π - ". pi has no
-# age. For the last shell command and its output's last line instead, the third row can be
-# [{ token = "$last_cmd", dim = true }, "$last_out"].
+# $session_title also removes its temporary "Action Required" prefix, pi's its "π - ", and a pi
+# session with no name yet shows its tab's name if you gave one. For the last shell command and
+# its output's last line instead, the third row can be [{ token = "$last_cmd", dim = true },
+# "$last_out"].
 #
 # Claude Code's sub-agents, while any run: how many at the end of the first row ($subagents:
 # ◐ 2, yellow like herdr's working dot, since the session's own dot shows done or idle once its
@@ -32,4 +33,4 @@ window_title = "{hostname}: {workspace} · {tab}"
 [ui.sidebar.agents.rows_by_agent]
 claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context", { token = "$subagents", fg = "#f9e2af" }], ["terminal_title_stripped"], ["$last_message"], ["$subagent_1"], ["$subagent_2"], ["$subagent_3"]]
 codex = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]
-pi = [["state_icon", "machine", "$icon_place", "$context"], ["$session_title"], ["$last_message"]]
+pi = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]

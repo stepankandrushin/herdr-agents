@@ -41,7 +41,8 @@ Two files do it:
 
 - herdr, with its Claude Code integration (`herdr integration install claude`), and its pi
   integration for pi panes (`herdr integration install pi`). Codex needs none: its log is found
-  from its process. Used with herdr 0.9.3 to 0.9.5.
+  from its process. A pi without the integration (run with `--no-extensions`, or sandboxed away
+  from herdr's socket) is found by its folder. Used with herdr 0.9.3 to 0.9.5.
 - Python 3.9 or newer (the system Python of macOS is enough).
 - Linux or macOS.
 
@@ -95,7 +96,7 @@ config takes effect at the next `herdr server reload-config`.
 - **The agents sidebar** (`[ui.sidebar.agents.rows_by_agent]`): three rows for each agent pane.
   Each pane shows the agent's emoji (🦀 Claude Code, 🌀 Codex, 🥧 pi) with its folder, then
   its age and context, on the first row, the session's name on the second, and the start of its
-  last message to you on the third. pi has no age. A Claude Code pane with sub-agents running
+  last message to you on the third. A Claude Code pane with sub-agents running
   adds their number to the first row (`◐ 2`, yellow like herdr's working dot) and a row
   for each, up to three; herdr leaves out a row with nothing in it, so the rows are there only
   while sub-agents run. The values are in
@@ -116,8 +117,8 @@ Each value is a pane token, which herdr's sidebar rows name with a `$`:
 |---|---|---|
 | `$place` | Claude Code, Codex, pi | The name of the folder the agent runs in (`~` for the home folder). herdr's own `workspace` names the folder the tab's workspace was opened in, which is wrong for a tab started elsewhere. |
 | `$icon_place` | Claude Code, Codex, pi | The agent's emoji and `$place`: `🦀 api`, `🌀 docs`, `🥧 api`. One token, because herdr puts ` · ` between a row's tokens everywhere but after the state dot, so it reads `● 🦀 api`. |
-| `$session_title` | Codex, pi | Its session name from the terminal title: Codex's with the working spinner and temporary `Action Required` prefix removed, pi's without its `π - `. Used for the sidebar and automatic tab name. |
-| `$last_active` | Claude Code, Codex | How long ago the session last did something: `now`, `7m`, `5h`, `3d`. It reads `now` for as long as herdr sees the agent at work. A resumed session shows the time of its last message, so herdr restoring its panes does not make them all look active. Codex's time comes from its current rollout, including turn completion and command events; a fresh session with no log has no age yet. The time itself is in `$last_active_at` (Unix seconds). |
+| `$session_title` | Codex, pi | Its session name from the terminal title: Codex's with the working spinner and temporary `Action Required` prefix removed, pi's without its `π - `. Used for the sidebar and automatic tab name. A pi session with no name yet, whose title is its folder alone, shows its tab's name instead if the tab was named by hand (by you or the script that opened it). |
+| `$last_active` | Claude Code, Codex, pi | How long ago the session last did something: `now`, `7m`, `5h`, `3d`. It reads `now` for as long as herdr sees the agent at work. A resumed session shows the time of its last message, so herdr restoring its panes does not make them all look active. Codex's and pi's time comes from the session's log: Codex's current rollout, including turn completion and command events, and pi's last message or tool result; a fresh session with no log has no age yet. The time itself is in `$last_active_at` (Unix seconds). |
 | `$context` | Claude Code, Codex, pi | The context the session holds, to the thousand: `5k`, `120k`. It is the tokens of the last model call, input and reply, as each agent counts them for its own gauge: Claude Code's usage with the cache, Codex's `last_token_usage.total_tokens`, pi's `totalTokens`. Empty before the first reply, and after a compaction until the next reply, except in Claude Code, whose compaction records what it left. |
 | `$last_message` | Claude Code, Codex, pi | The start of the agent's last message to you, on one line: the text it wrote last, between tool calls or at the end of its turn, with markdown's marks (`**`, backticks, headings, list bullets, link targets) removed. herdr cuts it to the sidebar's width. For pi, a turn that ended without a reply shows pi's reason: `Operation aborted`, `Request timed out.` Empty before the first message. |
 | `$subagents` | Claude Code | How many sub-agents run in the session, `◐ 2`; empty when none. A sub-agent runs from its launch until Claude Code marks it finished (done, failed or stopped), and again while a message wakes it. The session's own state dot shows done or idle once its turn has ended, though its background sub-agents work on. |
@@ -152,7 +153,11 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   Claude Code's transcript (`~/.claude/projects/*/<session>.jsonl`, by the session id herdr's
   integration reports), the Codex rollout file the `codex` process holds open (found in
   `/proc/<pid>/fd`, or with `lsof` on macOS, there at most once in 30 seconds), and the pi
-  session file herdr's pi integration reports. In Codex's default mode the `codex` process
+  session file herdr's pi integration reports. pi keeps no file open, so for a pi that the
+  integration does not report it takes the newest file in `~/.pi/agent/sessions/--<folder>--/`
+  (`$PI_CODING_AGENT_DIR` instead of `~/.pi/agent` when set), the folder pi keeps for the
+  directory it runs in, written since the pane's `pi` started and not reported by another pane;
+  two such pis in one directory both show the newer. In Codex's default mode the `codex` process
   holds none: its app-server daemon, which every `codex` started without `--no-daemon` shares,
   writes them all (`~/.codex/app-server-daemon/daemon.pid` names it). The pane's own is then the
   one whose session name, from `~/.codex/session_index.jsonl`, the pane's terminal title shows,
