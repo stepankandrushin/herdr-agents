@@ -19,7 +19,8 @@
 #   newest in Claude Code's or pi's folder for the pane's working directory. A command still
 #   running shows "…", one that failed "✗".
 # - Reports the start of each agent pane's last message to the user, on one line, from the
-#   same log, as $last_message: Done, tests pass and the fix is committed…
+#   same log, as $last_message: Done, tests pass and the fix is committed… Before the first,
+#   its last command.
 # - Reports the context each agent pane's session holds, from the same log, as $context: the
 #   tokens of its last model call to the thousand (5k, 120k).
 # - Reports the sub-agents running in each Claude Code pane, which go on after the session's own
@@ -349,6 +350,31 @@ def pi_message(path):
 MESSAGE = {"claude": claude_message, "codex": codex_message, "pi": pi_message}
 
 
+def pi_prompt(path, most=1 << 25):
+    """pi's first prompt, the name pi's own session list gives a session without one: the first
+    user message with text, read from the log's start."""
+    with open(path, "rb") as f:
+        for line in f:
+            try:
+                m = json.loads(line).get("message") or {}
+            except ValueError:
+                continue
+            text = m.get("role") == "user" and texts(m.get("content"))
+            if text and text.strip():
+                return text
+            if f.tell() > most:
+                break
+    return None
+
+
+def summary(a, agents, cache):
+    """The first prompt of a pi pane's session, kept once found."""
+    path = session_log(a, cache, agents)
+    if path and not cache.get(("prompt", path)):
+        cache[("prompt", path)] = gist(cached(cache, ("before prompt", path), path, pi_prompt))
+    return path and cache.get(("prompt", path))
+
+
 def kilo(n):
     """5k, 120k: to the thousand, short for the sidebar."""
     return "%dk" % int(n / 1000 + 0.5) if n else None
@@ -584,7 +610,8 @@ def commands(agents, seen, cache):
             pass  # a log this cannot read: tried again once it grows
         follow = found and found[3]
         seen[a["pane_id"]] = (stamp(path), follow, stamp(follow))
-        tokens = dict(command_tokens(found), context=kilo(size), last_message=gist(said))
+        tokens = dict(command_tokens(found), context=kilo(size))
+        tokens["last_message"] = gist(said) or tokens["last_cmd"]  # its command, before its first
         have = a.get("tokens") or {}
         if any(have.get(k) != v for k, v in tokens.items()):
             call("pane.report_metadata", {
@@ -820,7 +847,7 @@ def tick():
             refresh(agents, reached, cache=cache)
             places(agents)
             commands(agents, seen, cache)
-            tabs(agents, named)
+            tabs(agents, named, cache)
             subagents(agents, cache)
         except (FileNotFoundError, ConnectionRefusedError):
             if time.time() - reached > GONE:
@@ -935,11 +962,12 @@ def hand_named(a, agents):
     return label if label and not label.isdigit() and label != ours else None
 
 
-def tabs(agents, named):
+def tabs(agents, named, cache=None):
     """Keep each Claude, Codex or pi tab named as its title. Look again when its title, its
     tab or the agents beside it change. Codex's and pi's titles are their $session_title, but a
     pi session with no name yet, whose title is its folder alone, shows its tab's name if given by
-    hand: the folder is on the sidebar's first row already."""
+    hand, else its first prompt: the folder is on the sidebar's first row already."""
+    cache = {} if cache is None else cache
     supported = [a for a in agents if a.get("agent") in TITLES]
     for pane in set(named) - {a["pane_id"] for a in supported}:
         del named[pane]  # gone: a new agent there, even with the same session, renames
@@ -947,7 +975,7 @@ def tabs(agents, named):
         name = shown = TITLES[a["agent"]](a)
         folder = os.path.basename((a.get("foreground_cwd") or a.get("cwd") or "").rstrip("/"))
         if a["agent"] == "pi" and name and name == folder:
-            shown = hand_named(a, agents) or name
+            shown = hand_named(a, agents) or summary(a, agents, cache) or name
         if a["agent"] in ("codex", "pi") and (a.get("tokens") or {}).get("session_title") != shown:
             call("pane.report_metadata", {
                 "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),

@@ -482,6 +482,27 @@ class Pi(Logs):
                                      "errorMessage": "Operation aborted"}})
         self.assertEqual(herdr_agents.pi_message(path), "Operation aborted")
 
+    def test_first_prompt(self):
+        path = self.log({"type": "session", "cwd": "/src/api"},
+                        {"type": "message", "message": {"role": "system", "content": "You are pi."}},
+                        {"type": "message", "message": {"role": "user", "content": [{"type": "image"}]}},
+                        {"type": "message", "message": {"role": "user", "content": [
+                            {"type": "text", "text": "Turn the fans off at 22:00"}]}},
+                        {"type": "message", "message": {"role": "user", "content": "And the lights"}})
+        self.assertEqual(herdr_agents.pi_prompt(path), "Turn the fans off at 22:00")
+        self.assertIsNone(herdr_agents.pi_prompt(self.log({"type": "session"}, name="new.jsonl")))
+
+    def test_command_until_the_first_message(self):
+        call = {"type": "message", "message": {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "Let me look."},
+            {"type": "toolCall", "id": "t1", "name": "bash", "arguments": {"command": "ls"}}]}}
+        path = self.log(call)
+        pane = {"agent": "pi", "pane_id": "w1:p1"}
+        with mock.patch.object(herdr_agents, "session_log", return_value=path), \
+                mock.patch.object(herdr_agents, "call") as api:
+            herdr_agents.commands([pane], {}, {})
+        self.assertEqual(api.call_args.args[1]["tokens"]["last_message"], "$ ls")
+
     def test_activity_from_messages_and_tool_results(self):
         path = self.log(
             {"type": "message", "timestamp": "2026-01-02T03:00:00.000Z", "message": {"role": "assistant"}},
@@ -684,6 +705,8 @@ class Tabs(Logs):
             self.tab["label"] = params["label"]
             self.renames.append(params["label"])
             return {}
+        if method == "pane.process_info":
+            return {}
         if method == "pane.report_metadata":
             self.assertIn(params["agent"], ("codex", "pi"))
             if params["pane_id"] == self.pane["pane_id"]:
@@ -781,6 +804,21 @@ class Tabs(Logs):
         herdr_agents.tabs([pi], named)
         self.assertEqual(pi["tokens"]["session_title"], "Fix docs - api")
         self.assertEqual(self.tab["label"], "Login experiment")
+
+    def test_pi_without_a_session_name_shows_its_first_prompt(self):
+        path = self.log({"type": "session", "cwd": "/src/api"},
+                        {"type": "message", "message": {"role": "user", "content": [
+                            {"type": "text", "text": "Fix the **login** redirect\nin `auth.py`"}]}})
+        pi = self.pane
+        pi.update(agent="pi", cwd="/src/api", terminal_title="π - api", terminal_title_stripped="π - api",
+                  agent_session={"kind": "path", "value": path})
+        named = {}
+        herdr_agents.tabs([pi], named, {})
+        self.assertEqual(pi["tokens"]["session_title"], "Fix the login redirect in auth.py")
+        self.assertEqual(self.tab["label"], "🥧 api")
+        self.tab["label"] = "Login experiment"  # a name given by hand still wins
+        herdr_agents.tabs([pi], named, {})
+        self.assertEqual(pi["tokens"]["session_title"], "Login experiment")
 
     def test_name_given_before_the_emoji_takes_it(self):
         with herdr_agents.given_names() as given:

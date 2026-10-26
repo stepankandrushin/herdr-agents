@@ -20,9 +20,10 @@ window_title = "{hostname}: {workspace} · {tab}"
 # names the folder its workspace was opened in), how long ago it last did something
 # ($last_active: now, 7m, 5h, 3d) and the context its session holds ($context: 53k); then the
 # session's name, which the agent writes into its terminal title; then the start of its last
-# message to you ($last_message), on one line: what it is doing, or what it did. Codex's
-# $session_title also removes its temporary "Action Required" prefix, pi's its "π - ", and a pi
-# session with no name yet shows its tab's name if you gave one. For the last shell command and
+# message to you ($last_message), on one line: what it is doing, or what it did, and its last
+# shell command until it has written one. Codex's $session_title also removes its temporary
+# "Action Required" prefix, pi's its "π - ", and a pi session with no name yet shows its tab's
+# name if you gave one, else its first prompt. For the last shell command and
 # its output's last line instead, the third row can be [{ token = "$last_cmd", dim = true },
 # "$last_out"].
 #
