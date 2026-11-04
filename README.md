@@ -110,8 +110,9 @@ config takes effect at the next `herdr server reload-config`.
   terminal's window or tab list shows which session is in front, and on which machine.
 - **Colours** (`[theme.custom]`): pure black behind the sidebar, tab bar, popups and menus, so
   an OLED screen leaves those pixels off, and Matrix green for what is selected: the current
-  space and the focused agent sit on a green bar, the active tab is bright green. Pane contents
-  keep the outer terminal's background, so set that to black as well.
+  space and the focused agent sit on a green bar, the active tab is bright green. Text keeps
+  herdr's own colours. Pane contents keep the outer terminal's background, so set that to black
+  as well.
 - `onboarding = false` is herdr's own first-run marker: a new machine skips the tour.
 
 ## What it shows

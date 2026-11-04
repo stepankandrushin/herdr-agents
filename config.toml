@@ -14,22 +14,17 @@ prompt_new_tab_name = false
 # is its emoji and the session's name.
 window_title = "{hostname}: {workspace} · {tab}"
 
-# Colours over herdr's default theme: pure black behind everything, so an OLED screen leaves
-# those pixels off, and Matrix green for what is selected, so the current space and the focused
-# agent stand out on any screen (the default marks them with a grey a shade off the background).
-# Pane contents keep the outer terminal's own background: make that black too, e.g. Ghostty's
-# `background = #000000`.
+# Colours over herdr's default theme: pure black backgrounds, so an OLED screen leaves those
+# pixels off, and green for what is active, so the current space, the focused agent and the
+# active tab stand out on any screen (the default marks them with a grey a shade off the
+# background). Text keeps herdr's own colours. Pane contents keep the outer terminal's own
+# background: make that black too, e.g. Ghostty's `background = #000000`.
 [theme.custom]
 panel_bg = "#000000"       # tab bar, popups and menus
 sidebar_bg = "#000000"     # the sidebar, by default the outer terminal's background
-active_row_bg = "#006414"  # the current space and the focused agent: a green bar
-selection_bg = "#4a4a4a"   # navigate mode's cursor row, grey to tell it from the green bar
-accent = "#00ff41"         # the active tab, the chosen item in menus and settings
-green = "#00ff41"          # done and idle dots
-text = "#ffffff"           # names, white so they read on the green bar
-overlay0 = "#8fbf98"       # labels and dimmed text, pale green, readable on the bar too
-surface0 = "#103a18"       # inactive tabs
-surface_dim = "#2a7a35"    # separator lines
+active_row_bg = "#005c14"  # the current space and the focused agent: a green bar, dark enough
+                           # for herdr's grey text to read on it
+accent = "#00ff41"         # the active tab, and the chosen item in menus and settings
 
 # The agents sidebar, three rows for each agent pane.
 #
