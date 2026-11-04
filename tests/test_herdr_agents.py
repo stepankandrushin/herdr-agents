@@ -109,7 +109,7 @@ class Format(unittest.TestCase):
             herdr_agents.places(panes)
         self.assertEqual([(r["pane_id"], r["tokens"]) for r in reports],
                          [("p1", {"place": "api", "icon_place": "🦀 api"}),
-                          ("p2", {"place": None, "icon_place": "🥧"})])
+                          ("p2", {"icon_place": "🥧"})])  # only what changed: no place before either
 
 
 class Claude(Logs):
@@ -570,7 +570,7 @@ class PiSession(Logs):
                                 "message": {"role": "assistant"}}) + "\n")
         os.utime(path, (self.STARTED + 30, self.STARTED + 30))
         reported = []
-        with mock.patch.object(herdr_agents, "report", lambda pane, at, now, agent: reported.append((pane, at, agent))):
+        with mock.patch.object(herdr_agents, "report", lambda a, at, now: reported.append((a["pane_id"], at, a["agent"]))):
             herdr_agents.refresh([self.pane], 1767323045 + 7 * 60, cache={})
         self.assertEqual(reported, [("w1:p1", 1767323045, "pi")])
 
@@ -650,7 +650,7 @@ class ClaudeSession(Logs):
         self.session("current", self.STARTED + 30)
         self.pane["tokens"] = {"last_active": "2h", "last_active_at": "1767316000"}  # a pane's earlier agent
         reported = []
-        with mock.patch.object(herdr_agents, "report", lambda pane, at, now, agent: reported.append((pane, at, agent))):
+        with mock.patch.object(herdr_agents, "report", lambda a, at, now: reported.append((a["pane_id"], at, a["agent"]))):
             herdr_agents.refresh([self.pane], 1767323045 + 7 * 60, cache={})
         self.assertEqual(reported, [("w1:p1", 1767323045, "claude")])
 
@@ -826,6 +826,81 @@ class Tabs(Logs):
         self.tab["label"] = "Fix login | api"
         herdr_agents.tabs([self.pane], {})
         self.assertEqual(self.tab["label"], "🌀 Fix login | api")
+
+
+class Focus(unittest.TestCase):
+    """The focused agent's tokens and the current space's name under their second, green name."""
+
+    def reports(self, run):
+        reports = []
+        with mock.patch.object(herdr_agents, "call", lambda m, p: reports.append((m, p)) or {}):
+            run()
+        return reports
+
+    def test_focused_pane_reports_the_second_name(self):
+        pane = {"agent": "claude", "pane_id": "w1:p1", "focused": True,
+                "tokens": {"last_active_at": "5"}}
+        r = self.reports(lambda: herdr_agents.report(pane, 1767323045, 1767323045 + 120))
+        self.assertEqual(r[0][1]["tokens"], {"last_active_focused": "2m", "last_active_at": "1767323045"})
+        self.assertEqual(pane["tokens"], {"last_active_focused": "2m", "last_active_at": "1767323045"})
+
+    def test_focus_moves_tokens_both_ways(self):
+        was = {"agent": "claude", "pane_id": "w1:p1", "focused": False, "terminal_title_stripped": "Fix login",
+               "tokens": {"context_focused": "53k", "title_focused": "Fix login", "last_active_at": "5"}}
+        now = {"agent": "codex", "pane_id": "w1:p2", "focused": True, "terminal_title_stripped": "Docs",
+               "tokens": {"context": "9k", "session_title": "Docs"}}
+        shell = {"agent": None, "pane_id": "w1:p3", "focused": False, "tokens": {"x": "1"}}
+        r = self.reports(lambda: herdr_agents.focus([was, now, shell]))
+        self.assertEqual([p["pane_id"] for _, p in r], ["w1:p1", "w1:p2"])
+        self.assertEqual(r[0][1]["tokens"], {"context": "53k", "context_focused": None,
+                                             "title": "Fix login", "title_focused": None})
+        self.assertEqual(r[1][1]["tokens"], {"context_focused": "9k", "context": None,
+                                             "session_title_focused": "Docs", "session_title": None,
+                                             "title_focused": "Docs"})
+        self.assertEqual(self.reports(lambda: herdr_agents.focus([was, now])), [])  # in place
+
+    def test_at_most_16_tokens_to_a_report(self):
+        pane = {"agent": "claude", "pane_id": "w1:p1", "focused": True, "terminal_title_stripped": "v",
+                "tokens": {k: "v" for k in herdr_agents.SHOWN if k != "space"}}
+        r = self.reports(lambda: herdr_agents.focus([pane]))
+        self.assertEqual(sorted(len(p["tokens"]) for _, p in r), [10, 16])
+        self.assertEqual(sorted(pane["tokens"]), sorted(k + "_focused" for k in herdr_agents.SHOWN if k != "space"))
+
+    def test_hook_reports_its_focused_pane_age_under_the_second_name(self):
+        agents = [{"agent": "claude", "pane_id": "w1:p1", "focused": True, "tokens": {}}]
+        reports = []
+
+        def api(method, params):
+            if method == "agent.list":
+                return {"agents": agents}
+            reports.append((method, params))
+            return {}
+        hook = json.dumps({"hook_event_name": "UserPromptSubmit", "session_id": "s1"})
+        with mock.patch.dict(os.environ, {"HERDR_ENV": "1"}), \
+                mock.patch.object(herdr_agents, "SOCK", "/tmp/test.sock"), \
+                mock.patch.object(herdr_agents, "PANE", "w1:p1"), \
+                mock.patch.object(herdr_agents, "call", api), \
+                mock.patch.object(herdr_agents, "start_ticker"), \
+                mock.patch.object(herdr_agents.sys, "stdin", io.StringIO(hook)):
+            herdr_agents.main()
+        self.assertEqual(reports[0][1]["pane_id"], "w1:p1")
+        self.assertEqual(sorted(reports[0][1]["tokens"]), ["last_active_at", "last_active_focused"])
+
+    def test_current_space(self):
+        spaces = [{"workspace_id": "w1", "label": "api", "focused": True, "tokens": {"space": "api"}},
+                  {"workspace_id": "w2", "label": "docs", "focused": False}]
+        reports = []
+
+        def api(method, params):
+            if method == "workspace.list":
+                return {"workspaces": spaces}
+            reports.append((method, params))
+            return {}
+        with mock.patch.object(herdr_agents, "call", api):
+            herdr_agents.spaces()
+        self.assertEqual([(m, p["workspace_id"], p["tokens"]) for m, p in reports],
+                         [("workspace.report_metadata", "w1", {"space_focused": "api", "space": None}),
+                          ("workspace.report_metadata", "w2", {"space": "docs"})])
 
 
 if __name__ == "__main__":

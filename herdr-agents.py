@@ -2,7 +2,7 @@
 # herdr-agents: more in herdr's agents sidebar for Claude Code, Codex and pi panes.
 # https://github.com/stepankandrushin/herdr-agents, MIT license. README.md says how to install it.
 #
-# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does seven things in
+# A Claude Code hook (SessionStart, UserPromptSubmit, Stop, StopFailure). It does eight things in
 # the herdr server the pane belongs to:
 #
 # - Reports how long ago each Claude Code, Codex or pi session last did something as the pane
@@ -32,12 +32,15 @@
 #   has gone from the tab (quit, or a shell or another agent in its place), the tab takes
 #   herdr's number back. Only a tab holding no other agent, whose label is still herdr's
 #   generated number or the name this gave it, so a tab renamed by hand keeps its name.
+# - Reports the focused agent pane's tokens as $<name>_focused instead, and each space's name as
+#   $space, the current one's as $space_focused, which config.toml draws green: herdr's theme
+#   has no text colour for focus. With the terminal title as $title, for the same reason.
 #
-# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all seven
+# The hook starts `herdr-agents.py --tick`, one per herdr server, which keeps all eight
 # current: every two seconds it rereads the logs that have grown, redoes the ages that have
 # moved on, follows each supported pane's title into its tab, and starts itself again when this
-# file changes. It exits when the server has been gone for two minutes; the next hook starts a
-# new one.
+# file changes; herdr's focus events wake it in between, to move the focused names at once.
+# It exits when the server has been gone for two minutes; the next hook starts a new one.
 #
 # Prints nothing: a SessionStart or UserPromptSubmit hook's stdout goes to the model.
 import contextlib
@@ -51,6 +54,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 SOURCE = "herdr-agents"
@@ -144,11 +148,40 @@ def label(at, now):
     return "%dd" % (minutes // (24 * 60))
 
 
-def report(pane, at, now, agent="claude"):
-    call("pane.report_metadata", {
-        "pane_id": pane, "source": SOURCE, "agent": agent, "seq": time.time_ns(),
-        "tokens": {"last_active": label(at, now) if at else None,
-                   "last_active_at": "%d" % at if at else None}})
+# The focused agent's tokens and the current space's name go by a second name, <name>_focused,
+# which config.toml draws green: herdr's theme tells them apart by row background alone, with no
+# colour of their own for the text. A token has its value under one of its two names, the other
+# cleared, so a row that holds both shows it once. $last_active_at, never shown, keeps one name.
+FOCUSED = "_focused"
+SHOWN = ("last_active", "place", "icon_place", "last_cmd", "last_out", "last_message", "context",
+         "session_title", "title", "subagents", "subagent_1", "subagent_2", "subagent_3", "space")
+
+
+def put(a, tokens):
+    """Report the tokens that changed on an agent pane from agent.list, or a space from
+    workspace.list, under the names its focus gives them, at most 16 to a report as herdr takes
+    them. Its "tokens" then holds what herdr has, for the next look in the same pass."""
+    have = a.get("tokens") or {}
+    want = {}
+    for k, v in tokens.items():
+        if k in SHOWN:
+            on, off = (k + FOCUSED, k) if a.get("focused") else (k, k + FOCUSED)
+            want[on], want[off] = v, None
+        else:
+            want[k] = v
+    change = [(k, v) for k, v in want.items() if have.get(k) != v]
+    for i in range(0, len(change), 16):
+        params = {"source": SOURCE, "seq": time.time_ns(), "tokens": dict(change[i:i + 16])}
+        if "pane_id" in a:
+            call("pane.report_metadata", dict(params, pane_id=a["pane_id"], agent=a.get("agent")))
+        else:
+            call("workspace.report_metadata", dict(params, workspace_id=a["workspace_id"]))
+    a["tokens"] = {k: v for k, v in dict(have, **dict(change)).items() if v is not None}
+
+
+def report(a, at, now):
+    put(a, {"last_active": label(at, now) if at else None,
+            "last_active_at": "%d" % at if at else None})
 
 
 def refresh(agents, now, skip=None, cache=None):
@@ -184,10 +217,7 @@ def refresh(agents, now, skip=None, cache=None):
             at = now
         if not at and not from_log:
             continue
-        age = label(at, now) if at else None
-        epoch = "%d" % at if at else None
-        if tokens.get("last_active") != age or tokens.get("last_active_at") != epoch:
-            report(a["pane_id"], at, now, agent)
+        report(a, at, now)
 
 
 # The last shell command. Each reader returns (command, output, failed, follow), or None when
@@ -612,11 +642,7 @@ def commands(agents, seen, cache):
         seen[a["pane_id"]] = (stamp(path), follow, stamp(follow))
         tokens = dict(command_tokens(found), context=kilo(size))
         tokens["last_message"] = gist(said) or tokens["last_cmd"]  # its command, before its first
-        have = a.get("tokens") or {}
-        if any(have.get(k) != v for k, v in tokens.items()):
-            call("pane.report_metadata", {
-                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": tokens})
+        put(a, tokens)
 
 
 # Claude Code's sub-agents. Each one writes its own log beside the session's transcript,
@@ -781,12 +807,7 @@ def subagents(agents, cache):
         if a.get("agent") != "claude":
             continue
         path = session_log(a, cache, agents)
-        tokens = subagent_tokens(running_subagents(a["pane_id"], path, cache) if path else [])
-        have = a.get("tokens") or {}
-        if any(have.get(k) != v for k, v in tokens.items()):
-            call("pane.report_metadata", {
-                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": tokens})
+        put(a, subagent_tokens(running_subagents(a["pane_id"], path, cache) if path else []))
 
 
 def place(a):
@@ -805,12 +826,51 @@ def places(agents):
         if a.get("agent") not in READERS:
             continue
         icon, where = ICONS[a["agent"]], place(a)
-        tokens = {"place": where, "icon_place": "%s %s" % (icon, where) if where else icon}
+        put(a, {"place": where, "icon_place": "%s %s" % (icon, where) if where else icon})
+
+
+def focus(agents):
+    """Move each agent pane's tokens to the names its focus gives them (FOCUSED) when focus has
+    moved, and keep its terminal title as $title: herdr's own terminal_title_stripped cannot
+    change colour with focus."""
+    for a in agents:
+        if a.get("agent") not in READERS:
+            continue
         have = a.get("tokens") or {}
-        if any(have.get(k) != v for k, v in tokens.items()):
-            call("pane.report_metadata", {
-                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": tokens})
+        tokens = {k: have.get(k, have.get(k + FOCUSED)) for k in SHOWN if k != "space"}
+        tokens["title"] = (a.get("terminal_title_stripped") or "").strip() or None
+        put(a, tokens)
+
+
+def spaces():
+    """Each space's name as $space, the current one's as $space_focused."""
+    for w in call("workspace.list", {}).get("workspaces", []):
+        put(w, {"space": w.get("label") or None})
+
+
+# What wakes the ticker between its passes: focus moving, and spaces made or renamed, so that the
+# green follows at once.
+EVENTS = ("pane.focused", "workspace.focused", "workspace.created", "workspace.renamed",
+          "pane.agent_detected")
+
+
+def listen(wake):
+    """Set wake on each of herdr's EVENTS. A thread of the ticker's, connecting again while the
+    server is away."""
+    while True:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.connect(SOCK)
+            req = {"id": "%s:events" % SOURCE, "method": "events.subscribe",
+                   "params": {"subscriptions": [{"type": t} for t in EVENTS]}}
+            s.sendall((json.dumps(req) + "\n").encode())
+            for _ in s.makefile("rb"):
+                wake.set()
+        except OSError:
+            pass
+        finally:
+            s.close()
+        time.sleep(TICK)
 
 
 def ticker_lock():
@@ -832,9 +892,12 @@ def tick():
         return
     me = os.path.abspath(__file__)
     version = os.stat(me).st_mtime_ns
-    seen, cache, named, reached = {}, {}, {}, time.time()
+    seen, cache, named, reached, passed = {}, {}, {}, time.time(), 0
+    wake = threading.Event()
+    threading.Thread(target=listen, args=(wake,), daemon=True).start()
     while True:
-        time.sleep(TICK)
+        woke = wake.wait(TICK)
+        wake.clear()
         try:
             if os.stat(me).st_mtime_ns != version:
                 lock.close()
@@ -844,6 +907,11 @@ def tick():
         try:
             agents = call("agent.list", {}).get("agents", [])
             reached = time.time()
+            focus(agents)
+            spaces()
+            if woke and reached - passed < TICK:
+                continue  # woken for focus: the logs at the next pass
+            passed = reached
             refresh(agents, reached, cache=cache)
             places(agents)
             commands(agents, seen, cache)
@@ -976,10 +1044,8 @@ def tabs(agents, named, cache=None):
         folder = os.path.basename((a.get("foreground_cwd") or a.get("cwd") or "").rstrip("/"))
         if a["agent"] == "pi" and name and name == folder:
             shown = hand_named(a, agents) or summary(a, agents, cache) or name
-        if a["agent"] in ("codex", "pi") and (a.get("tokens") or {}).get("session_title") != shown:
-            call("pane.report_metadata", {
-                "pane_id": a["pane_id"], "source": SOURCE, "agent": a["agent"], "seq": time.time_ns(),
-                "tokens": {"session_title": shown}})
+        if a["agent"] in ("codex", "pi"):
+            put(a, {"session_title": shown})
         seen = (a.get("tab_id"), name, alone(a, agents))
         if name and named.get(a["pane_id"]) != seen:
             name_tab(a, agents, name)
@@ -1003,9 +1069,10 @@ def main():
     at = now
     if hook.get("hook_event_name") == "SessionStart" and hook.get("source") == "resume" and path:
         at = last_message_at(path) or now  # resumed, perhaps by herdr's own restart
-    report(PANE, at, now)
 
     agents = call("agent.list", {}).get("agents", [])
+    pane = next((a for a in agents if a.get("pane_id") == PANE), {"pane_id": PANE})
+    report(dict(pane, agent="claude"), at, now)
     sid = hook.get("session_id")
     me = (next((a for a in agents if (a.get("agent_session") or {}).get("value") == sid), None)
           or next((a for a in agents if a.get("pane_id") == PANE), None))

@@ -79,8 +79,9 @@ Two files do it:
    ```
 
    or merge into your `~/.config/herdr/config.toml` the parts of [config.toml](config.toml) you
-   want; the `[ui.sidebar.agents.rows_by_agent]` table is the one that shows the values. Then
-   reload it: `herdr server reload-config`.
+   want; the `[ui.sidebar.agents.rows_by_agent]` table is the one that shows the values, and
+   `[ui.sidebar.spaces]` the green name of the current space. Then reload it:
+   `herdr server reload-config`.
 
 4. Start Claude Code in a herdr pane. Its first hook starts the ticker, which fills in every
    agent pane of that herdr server within two seconds. Claude Code reads its hooks when a
@@ -100,19 +101,23 @@ config takes effect at the next `herdr server reload-config`.
   last message to you on the third. A Claude Code pane with sub-agents running
   adds their number to the first row (`◐ 2`, yellow like herdr's working dot) and a row
   for each, up to three; herdr leaves out a row with nothing in it, so the rows are there only
-  while sub-agents run. The values are in
+  while sub-agents run. The text is white, and the focused agent's green: each value is in its
+  row twice, as `$name` in white and `$name_focused` in green, and herdr-agents gives a value
+  to one of the two, by focus ([Focus in green](#focus-in-green)). The values are in
   [What it shows](#what-it-shows). A comment there gives the third row that shows the last
   command and its output instead.
+- **The spaces sidebar** (`[ui.sidebar.spaces]`): the current space's name in bold green
+  (`$space_focused`), the others' in herdr's grey (`$space`), and herdr's second row, the git
+  branch and how far ahead or behind.
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
   of asking for a name. Claude Code, Codex and pi tabs then take their session names by themselves
   ([Tab names](#tab-names)); other tabs keep their numbers until you rename them.
 - **The outer terminal's title** (`window_title`): the host, the workspace and the tab, so the
   terminal's window or tab list shows which session is in front, and on which machine.
 - **Colours** (`[theme.custom]`): pure black behind the sidebar, tab bar, popups and menus, so
-  an OLED screen leaves those pixels off, and Matrix green for what is selected: the current
-  space and the focused agent sit on a green bar, the active tab is bright green. Text keeps
-  herdr's own colours. Pane contents keep the outer terminal's background, so set that to black
-  as well.
+  an OLED screen leaves those pixels off, with no bar behind the current space and the focused
+  agent, whose text is green instead (the two sidebar tables above); the active tab is a bright
+  green chip. Pane contents keep the outer terminal's background, so set that to black as well.
 - `onboarding = false` is herdr's own first-run marker: a new machine skips the tour.
 
 ## What it shows
@@ -131,9 +136,23 @@ Each value is a pane token, which herdr's sidebar rows name with a `$`:
 | `$subagent_1` … `$subagent_3` | Claude Code | A row for each running sub-agent, the first launched first: `├`, its task as the session described it, and what it is doing now, its newest tool call in words (`Editing auth.py`, `Searching TODO`, a command's description) or the text it wrote since: `├ Fix the login test · Editing auth.py`. The last one starts with `└`. With more than three running, the third reads `└ 2 more`. On a narrow sidebar herdr cuts the row after the task. |
 | `$last_cmd` | Claude Code, Codex, pi | The last shell command, `$ ` and its first line, without a leading `cd <dir> &&`. |
 | `$last_out` | Claude Code, Codex, pi | The last line of that command's output that has a letter or digit in it. `…` while the command runs, `✗ <line>` if it failed, `✓` if it printed nothing. For a Claude Code background command or an output too long for the transcript, it is read from the file the output went to, so a long job shows its current line. |
+| `$title` | Claude Code, Codex, pi | The terminal title without the agent's state glyph, as herdr's own `terminal_title_stripped`, which keeps one colour: the second row of a Claude Code pane. |
+| `$space` | (a space) | The space's name, as herdr's own `workspace`, which keeps one colour. A workspace token, for `[ui.sidebar.spaces]`. |
 
 When a row is too long for the sidebar, herdr shortens the folder before the age and the
 context, which stay whole.
+
+### Focus in green
+
+herdr's theme marks the current space and the focused agent with a row background alone
+(`active_row_bg`), with no text colour of their own: its `text` colour is every menu's and
+popup's text too. So herdr-agents reports each token above under a second name on the focused
+agent's pane, `$<name>_focused` (`$last_message_focused`), and the current space's name as
+`$space_focused`, clearing the plain name there, and back when focus moves on. A row that holds
+both names, each with its own `fg`, shows the one that has a value. The ticker follows herdr's
+focus events, so the green moves with focus at once, not at its next pass. `$last_active_at`
+keeps one name. Without the ticker, a space's row shows its state dot alone and a Claude Code
+pane's second row is empty.
 
 ### Tab names
 
@@ -155,7 +174,9 @@ number or the name herdr-agents gave it. A tab you renamed by hand keeps its nam
   server. Outside herdr it exits at once.
 - **The ticker** (`herdr-agents.py --tick`) runs one per herdr server, guarded by a lock. Every
   two seconds it asks herdr for its agent panes, rereads only the session logs that have grown,
-  moves the ages on, and reports the tokens that changed. It reads each agent's own log:
+  moves the ages on, and reports the tokens that changed, under the names focus gives them
+  ([Focus in green](#focus-in-green)); a focus event from herdr wakes it between passes for
+  that alone. It reads each agent's own log:
   Claude Code's transcript (`~/.claude/projects/*/<session>.jsonl`, by the session id herdr's
   integration reports; for a Claude Code the integration does not report, the newest
   `projects/<folder>/*.jsonl` under its config folder, the `CLAUDE_CONFIG_DIR` the process was

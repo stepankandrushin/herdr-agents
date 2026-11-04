@@ -15,16 +15,21 @@ prompt_new_tab_name = false
 window_title = "{hostname}: {workspace} · {tab}"
 
 # Colours over herdr's default theme: pure black backgrounds, so an OLED screen leaves those
-# pixels off, and green for what is active, so the current space, the focused agent and the
-# active tab stand out on any screen (the default marks them with a grey a shade off the
-# background). Text keeps herdr's own colours. Pane contents keep the outer terminal's own
-# background: make that black too, e.g. Ghostty's `background = #000000`.
+# pixels off, with no bar behind the current space and the focused agent; their text is green
+# instead (the sidebar rows below), and the active tab a green chip. Pane contents keep the outer
+# terminal's own background: make that black too, e.g. Ghostty's `background = #000000`.
 [theme.custom]
 panel_bg = "#000000"       # tab bar, popups and menus
 sidebar_bg = "#000000"     # the sidebar, by default the outer terminal's background
-active_row_bg = "#005c14"  # the current space and the focused agent: a green bar, dark enough
-                           # for herdr's grey text to read on it
+active_row_bg = "#000000"  # the current space and the focused agent, by default a grey bar
 accent = "#00ff41"         # the active tab, and the chosen item in menus and settings
+
+# Spaces: the current one's name green and bold. herdr has no colour of its own for it (its
+# theme's text colour is every menu's text too), so herdr-agents reports each space's name as
+# $space, the current one's as $space_focused instead; without herdr-agents' ticker a space shows
+# its dot alone. The second row is herdr's own: the git branch and how far ahead or behind.
+[ui.sidebar.spaces]
+rows = [["state_icon", { token = "$space", fg = "#a6adc8" }, { token = "$space_focused", fg = "#00ff41", bold = true }], ["branch", "git_status"]]
 
 # The agents sidebar, three rows for each agent pane.
 #
@@ -43,7 +48,26 @@ accent = "#00ff41"         # the active tab, and the chosen item in menus and se
 # ◐ 2, yellow like herdr's working dot, since the session's own dot shows done or idle once its
 # turn ends), then a row for each, up to three: ├ its task · what it is doing now. Rows with
 # nothing in them are left out, so these are there only while sub-agents run.
+#
+# White text, where herdr's is a grey hard to read on black, and green for the focused agent:
+# herdr-agents reports its tokens as $<name>_focused instead ($title is the terminal title), so
+# each token is there twice, white and green, and only one of the two has a value.
 [ui.sidebar.agents.rows_by_agent]
-claude = [["state_icon", "machine", "$icon_place", "$last_active", "$context", { token = "$subagents", fg = "#f9e2af" }], ["terminal_title_stripped"], ["$last_message"], ["$subagent_1"], ["$subagent_2"], ["$subagent_3"]]
-codex = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]
-pi = [["state_icon", "machine", "$icon_place", "$last_active", "$context"], ["$session_title"], ["$last_message"]]
+claude = [
+  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }, { token = "$subagents", fg = "#f9e2af" }, { token = "$subagents_focused", fg = "#f9e2af" }],
+  [{ token = "$title", fg = "#ffffff" }, { token = "$title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_1", fg = "#ffffff" }, { token = "$subagent_1_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_2", fg = "#ffffff" }, { token = "$subagent_2_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_3", fg = "#ffffff" }, { token = "$subagent_3_focused", fg = "#00ff41" }],
+]
+codex = [
+  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }],
+  [{ token = "$session_title", fg = "#ffffff" }, { token = "$session_title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
+]
+pi = [
+  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }],
+  [{ token = "$session_title", fg = "#ffffff" }, { token = "$session_title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
+]
