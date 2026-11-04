@@ -49,25 +49,26 @@ rows = [["state_icon", { token = "$space", fg = "#a6adc8" }, { token = "$space_f
 # turn ends), then a row for each, up to three: ├ its task · what it is doing now. Rows with
 # nothing in them are left out, so these are there only while sub-agents run.
 #
-# White text, where herdr's is a grey hard to read on black, and green for the focused agent:
-# herdr-agents reports its tokens as $<name>_focused instead ($title is the terminal title), so
-# each token is there twice, white and green, and only one of the two has a value.
+# Light grey text (#c0c0c0), where herdr's is a darker grey hard to read on black, and not white,
+# so the sidebar stays apart from the panes' text; green for the focused agent: herdr-agents
+# reports its tokens as $<name>_focused instead ($title is the terminal title), so each token is
+# there twice, light grey and green, and only one of the two has a value.
 [ui.sidebar.agents.rows_by_agent]
 claude = [
-  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }, { token = "$subagents", fg = "#f9e2af" }, { token = "$subagents_focused", fg = "#f9e2af" }],
-  [{ token = "$title", fg = "#ffffff" }, { token = "$title_focused", fg = "#00ff41" }],
-  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
-  [{ token = "$subagent_1", fg = "#ffffff" }, { token = "$subagent_1_focused", fg = "#00ff41" }],
-  [{ token = "$subagent_2", fg = "#ffffff" }, { token = "$subagent_2_focused", fg = "#00ff41" }],
-  [{ token = "$subagent_3", fg = "#ffffff" }, { token = "$subagent_3_focused", fg = "#00ff41" }],
+  ["state_icon", { token = "machine", fg = "#c0c0c0" }, { token = "$icon_place", fg = "#c0c0c0" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#c0c0c0" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#c0c0c0" }, { token = "$context_focused", fg = "#00ff41" }, { token = "$subagents", fg = "#f9e2af" }, { token = "$subagents_focused", fg = "#f9e2af" }],
+  [{ token = "$title", fg = "#c0c0c0" }, { token = "$title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#c0c0c0" }, { token = "$last_message_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_1", fg = "#c0c0c0" }, { token = "$subagent_1_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_2", fg = "#c0c0c0" }, { token = "$subagent_2_focused", fg = "#00ff41" }],
+  [{ token = "$subagent_3", fg = "#c0c0c0" }, { token = "$subagent_3_focused", fg = "#00ff41" }],
 ]
 codex = [
-  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }],
-  [{ token = "$session_title", fg = "#ffffff" }, { token = "$session_title_focused", fg = "#00ff41" }],
-  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
+  ["state_icon", { token = "machine", fg = "#c0c0c0" }, { token = "$icon_place", fg = "#c0c0c0" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#c0c0c0" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#c0c0c0" }, { token = "$context_focused", fg = "#00ff41" }],
+  [{ token = "$session_title", fg = "#c0c0c0" }, { token = "$session_title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#c0c0c0" }, { token = "$last_message_focused", fg = "#00ff41" }],
 ]
 pi = [
-  ["state_icon", { token = "machine", fg = "#ffffff" }, { token = "$icon_place", fg = "#ffffff" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#ffffff" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#ffffff" }, { token = "$context_focused", fg = "#00ff41" }],
-  [{ token = "$session_title", fg = "#ffffff" }, { token = "$session_title_focused", fg = "#00ff41" }],
-  [{ token = "$last_message", fg = "#ffffff" }, { token = "$last_message_focused", fg = "#00ff41" }],
+  ["state_icon", { token = "machine", fg = "#c0c0c0" }, { token = "$icon_place", fg = "#c0c0c0" }, { token = "$icon_place_focused", fg = "#00ff41" }, { token = "$last_active", fg = "#c0c0c0" }, { token = "$last_active_focused", fg = "#00ff41" }, { token = "$context", fg = "#c0c0c0" }, { token = "$context_focused", fg = "#00ff41" }],
+  [{ token = "$session_title", fg = "#c0c0c0" }, { token = "$session_title_focused", fg = "#00ff41" }],
+  [{ token = "$last_message", fg = "#c0c0c0" }, { token = "$last_message_focused", fg = "#00ff41" }],
 ]

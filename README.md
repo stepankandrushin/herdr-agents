@@ -101,9 +101,9 @@ config takes effect at the next `herdr server reload-config`.
   last message to you on the third. A Claude Code pane with sub-agents running
   adds their number to the first row (`◐ 2`, yellow like herdr's working dot) and a row
   for each, up to three; herdr leaves out a row with nothing in it, so the rows are there only
-  while sub-agents run. The text is white, and the focused agent's green: each value is in its
-  row twice, as `$name` in white and `$name_focused` in green, and herdr-agents gives a value
-  to one of the two, by focus ([Focus in green](#focus-in-green)). The values are in
+  while sub-agents run. The text is light grey, and the focused agent's green: each value is in
+  its row twice, as `$name` in light grey and `$name_focused` in green, and herdr-agents gives
+  a value to one of the two, by focus ([Focus in green](#focus-in-green)). The values are in
   [What it shows](#what-it-shows). A comment there gives the third row that shows the last
   command and its output instead.
 - **The spaces sidebar** (`[ui.sidebar.spaces]`): the current space's name in bold green
