@@ -107,7 +107,7 @@ config takes effect at the next `herdr server reload-config`.
   [What it shows](#what-it-shows). A comment there gives the third row that shows the last
   command and its output instead.
 - **The spaces sidebar** (`[ui.sidebar.spaces]`): the current space's name in bold green
-  (`$space_focused`), the others' in herdr's grey (`$space`), and herdr's second row, the git
+  (`$space_focused`), the others' in light grey (`$space`), and herdr's second row, the git
   branch and how far ahead or behind.
 - **Tabs** (`prompt_new_tab_name = false`): a new tab opens at once with herdr's number instead
   of asking for a name. Claude Code, Codex and pi tabs then take their session names by themselves
@@ -117,7 +117,9 @@ config takes effect at the next `herdr server reload-config`.
 - **Colours** (`[theme.custom]`): pure black behind the sidebar, tab bar, popups and menus, so
   an OLED screen leaves those pixels off, with no bar behind the current space and the focused
   agent, whose text is green instead (the two sidebar tables above); the active tab is a bright
-  green chip. Pane contents keep the outer terminal's background, so set that to black as well.
+  green chip. `overlay0`, herdr's dark grey for the other tabs' names, the sidebar's headers and
+  its labels and hints, is light grey (#c0c0c0), the sidebar rows' colour. Pane contents keep
+  the outer terminal's background, so set that to black as well.
 - `onboarding = false` is herdr's own first-run marker: a new machine skips the tour.
 
 ## What it shows
